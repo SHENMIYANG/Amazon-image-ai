@@ -1,0 +1,94 @@
+.image-plan-card {
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 1.2rem;
+  transition: all 0.2s;
+}
+
+.image-plan-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.image-plan-card.main-image {
+  border: 2px solid #28a745;
+  background: #d4edda;
+}
+
+.card-header {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.card-number {
+  display: inline-block;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.card-number.main {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+.main-image-badge {
+  background: #ffc107;
+  color: #856404;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.card-body .form-group label {
+  font-size: 0.85rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.card-body .form-group input,
+.card-body .form-group textarea {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.card-body .form-group input:focus,
+.card-body .form-group textarea:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.card-body .form-group input:disabled {
+  background: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.card-body .form-group textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.help-text {
+  font-size: 0.75rem;
+  color: #6c757d;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}

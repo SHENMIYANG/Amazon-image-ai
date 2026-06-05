@@ -1,0 +1,87 @@
+.resolution-selector {
+  margin-bottom: 1.5rem;
+}
+
+.selector-header {
+  margin-bottom: 1rem;
+}
+
+.selector-header h3 {
+  font-size: 1.1rem;
+  color: #495057;
+  margin: 0;
+}
+
+.resolution-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.resolution-option {
+  border: 2px solid #e9ecef;
+  border-radius: 10px;
+  padding: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: white;
+}
+
+.resolution-option:hover {
+  border-color: #007bff;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.15);
+}
+
+.resolution-option.selected {
+  border-color: #28a745;
+  background: #d4edda;
+}
+
+.option-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.option-label {
+  font-weight: 600;
+  color: #343a40;
+  font-size: 1rem;
+}
+
+.check-mark {
+  font-size: 1.2rem;
+}
+
+.option-size {
+  font-size: 0.85rem;
+  color: #6c757d;
+  font-family: monospace;
+  margin-bottom: 0.3rem;
+}
+
+.option-desc {
+  font-size: 0.85rem;
+  color: #6c757d;
+  margin-bottom: 0.3rem;
+}
+
+.option-price {
+  font-size: 0.8rem;
+  color: #28a745;
+  font-weight: 600;
+}
+
+.cost-estimate {
+  padding: 0.8rem 1rem;
+  background: #fff3cd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #856404;
+}
+
+.cost-estimate strong {
+  color: #664d03;
+}
