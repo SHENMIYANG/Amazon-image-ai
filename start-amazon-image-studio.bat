@@ -12,13 +12,12 @@ where node >nul 2>nul
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Node.js NOT FOUND!
-    echo.
-    echo Please install Node.js from:
-    echo https://nodejs.org/
+    echo Install from: https://nodejs.org/
     echo.
     pause
     exit /b 1
 )
+
 echo [OK] Node.js found
 node --version
 npm --version
@@ -26,7 +25,6 @@ echo.
 
 echo [Step 2/5] Cleaning old Node processes...
 taskkill /F /IM node.exe >nul 2>nul
-pause
 timeout /t 2 /nobreak >nul
 echo [OK] Cleaned
 echo.
