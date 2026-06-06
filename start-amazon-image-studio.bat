@@ -12,12 +12,13 @@ where node >nul 2>nul
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Node.js NOT FOUND!
-    echo Install from: https://nodejs.org/
+    echo.
+    echo Please install Node.js from:
+    echo https://nodejs.org/
     echo.
     pause
     exit /b 1
 )
-
 echo [OK] Node.js found
 node --version
 npm --version
@@ -106,21 +107,19 @@ echo.
 echo [Step 5/5] Starting services...
 echo.
 echo ========================================
-echo   Starting...
+echo   Started!
 echo ========================================
 echo Frontend: http://localhost:5173
-echo Backend: http://localhost:3001
+echo Backend:  http://localhost:3001
 echo.
-echo Press Ctrl+C to stop
+echo Press Ctrl+C to stop all services
+echo ========================================
 echo.
 
-call npm run dev
+npx concurrently --kill-others ^
+  --names "BACKEND,FRONTEND" ^
+  --prefix-colors "cyan,green" ^
+  "cd backend && npm start" ^
+  "cd frontend && npm run dev"
 
-echo.
-echo [ERROR] Failed to start!
-echo Error code: %errorlevel%
-echo.
-echo Try: stop-amazon-image-studio.bat
-echo.
 pause
-exit /b 1
