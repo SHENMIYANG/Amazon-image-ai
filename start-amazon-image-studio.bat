@@ -26,6 +26,7 @@ echo.
 
 echo [Step 2/5] Cleaning old Node processes...
 taskkill /F /IM node.exe >nul 2>nul
+pause
 timeout /t 2 /nobreak >nul
 echo [OK] Cleaned
 echo.
@@ -107,19 +108,19 @@ echo.
 echo [Step 5/5] Starting services...
 echo.
 echo ========================================
-echo   Started!
+echo   Starting...
 echo ========================================
 echo Frontend: http://localhost:5173
-echo Backend:  http://localhost:3001
+echo Backend: http://localhost:3001
 echo.
-echo Press Ctrl+C to stop all services
-echo ========================================
+echo Press Ctrl+C to stop
 echo.
 
-npx concurrently --kill-others ^
-  --names "BACKEND,FRONTEND" ^
-  --prefix-colors "cyan,green" ^
-  "cd backend && npm start" ^
-  "cd frontend && npm run dev"
+call npm run dev
 
+echo.
+echo [ERROR] Failed to start!
+echo Error code: %errorlevel%
+echo.
 pause
+exit /b 1
