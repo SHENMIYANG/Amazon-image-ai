@@ -24,7 +24,7 @@ npm --version
 echo.
 
 echo [Step 2/5] Cleaning old Node processes...
-taskkill /F /IM node.exe >nul 2>nul
+taskkill /F /IM node.exe 2>nul
 timeout /t 2 /nobreak >nul
 echo [OK] Cleaned
 echo.
