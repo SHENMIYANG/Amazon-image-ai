@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 title Amazon Image Studio
 
 echo ========================================
@@ -11,9 +12,7 @@ where node >nul 2>nul
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Node.js NOT FOUND!
-    echo.
-    echo Please install Node.js from:
-    echo https://nodejs.org/
+    echo Install from: https://nodejs.org/
     echo.
     pause
     exit /b 1
@@ -125,4 +124,3 @@ echo Try: stop-amazon-image-studio.bat
 echo.
 pause
 exit /b 1
-
