@@ -1,50 +1,21 @@
 @echo off
-setlocal enabledelayedexpansion
-cls
+cd /d "%~dp0"
+title Amazon Image Studio
 
-echo ====================================
-echo   Ecommerce Image Gen - Dev Mode
-echo ====================================
+echo ========================================
+echo   Amazon Image Studio - Quick Start
+echo ========================================
 echo.
 
-REM Check .env
-if not exist "backend\.env" (
-    echo Warning: backend\.env not found
-    echo Please configure OpenAI API Key first
-    echo.
-)
+echo Cleaning old processes...
+taskkill /F /IM node.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
 
-echo Starting backend...
-echo.
-
-REM Start backend in background
-start /b cmd /k "cd backend ^&^& npm run dev"
-
-echo Waiting for backend to start...
-timeout /t 3 /nobreak >nul
-
-echo.
-echo Starting frontend...
-echo.
-
-REM Start frontend in background
-start /b cmd /k "cd frontend ^&^& npm run dev"
-
-timeout /t 3 /nobreak >nul
-
-echo.
-echo ====================================
-echo   Services Starting...
-echo ====================================
-echo.
+echo Starting services...
 echo Frontend: http://localhost:5173
-echo Backend:  http://localhost:3001
-echo Health:   http://localhost:3001/api/health
+echo Backend: http://localhost:3001
 echo.
-echo Services running in background
-echo Close this window to exit
-echo ====================================
+echo Press Ctrl+C to stop
 echo.
 
-REM Keep window open
-cmd /k
+call npm run dev
