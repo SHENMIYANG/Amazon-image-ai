@@ -56,18 +56,18 @@ if not exist "frontend\node_modules" (
     echo [INFO] Frontend dependencies NOT installed, installing now...
     echo This may take 2-3 minutes on first run.
     echo.
-    cd frontend
+    pushd frontend
     call npm install
     if %errorlevel% neq 0 (
+        popd
         echo.
         echo [ERROR] Frontend install FAILED!
         echo Check your internet connection and try again.
         echo.
-        cd ..
         pause
         exit /b 1
     )
-    cd ..
+    popd
     echo [OK] Frontend dependencies installed
 ) else (
     echo [OK] Frontend dependencies found
@@ -77,17 +77,17 @@ echo.
 
 if not exist "backend\node_modules" (
     echo [INFO] Backend dependencies NOT installed, installing now...
-    cd backend
+    pushd backend
     call npm install --production
     if %errorlevel% neq 0 (
+        popd
         echo.
         echo [ERROR] Backend install FAILED!
         echo.
-        cd ..
         pause
         exit /b 1
     )
-    cd ..
+    popd
     echo [OK] Backend dependencies installed
 ) else (
     echo [OK] Backend dependencies found
