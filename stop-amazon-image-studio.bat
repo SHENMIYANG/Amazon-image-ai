@@ -1,21 +1,21 @@
 @echo off
-title Amazon Image Studio - 停止服务
+title Amazon Image Studio - Stop
 
 echo ========================================
-echo   正在停止 Amazon Image Studio...
+echo   Stopping Amazon Image Studio...
 echo ========================================
 echo.
 
-:: 查找并结束 Node 进程
-echo [停止] 正在结束 Node 进程...
+:: Stop Node processes
+echo [Stop] Terminating Node processes...
 
 taskkill /F /IM node.exe 2>nul
 if %errorlevel% equ 0 (
-    echo [成功] 服务已停止
+    echo [OK] Services stopped
 ) else (
-    echo [提示] 未找到运行中的 Node 进程
+    echo [INFO] No running Node processes found
 )
 
 echo.
-echo 按任意键关闭此窗口...
-pause >nul
+echo Press any key to close this window...
+pause

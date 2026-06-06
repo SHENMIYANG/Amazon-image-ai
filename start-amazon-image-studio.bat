@@ -1,74 +1,115 @@
 @echo off
-chcp 65001 >nul
-title Amazon Image Studio - 启动脚本
+title Amazon Image Studio - Start
 
 echo ========================================
-echo   Amazon Image Studio 启动程序
+echo   Amazon Image Studio - Startup
 echo ========================================
 echo.
 
-:: 检查 Node.js
+:: Step 1: Check Node.js
+echo [Step 1] Checking Node.js...
 where node >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [错误] 未检测到 Node.js
     echo.
-    echo 请先安装 Node.js 20 LTS 或更高版本
-    echo 下载地址：https://nodejs.org/
+    echo [ERROR] Node.js NOT FOUND!
+    echo.
+    echo Please install Node.js 20 LTS or higher first.
+    echo Download: https://nodejs.org/
+    echo.
+    echo Install Node.js, then run this script again.
     echo.
     pause
     exit /b 1
 )
-
-echo [检查] Node.js 已安装
+echo [OK] Node.js found
 node --version
 echo.
 
-:: 检查前端依赖
+:: Step 2: Clean old processes
+echo [Step 2] Cleaning old Node processes...
+taskkill /F /IM node.exe >nul 2>nul
+timeout /t 2 /nobreak >nul
+echo [OK] Cleaned
+echo.
+
+:: Step 3: Check dependencies
+echo [Step 3] Checking dependencies...
 if not exist "frontend\node_modules" (
-    echo [安装] 首次运行，正在安装前端依赖...
+    echo [INFO] Frontend dependencies NOT installed, installing now...
+    echo This may take 2-3 minutes on first run.
+    echo.
     cd frontend
-    call npm ci
+    call npm install
     if %errorlevel% neq 0 (
-        echo [错误] 前端依赖安装失败
+        echo.
+        echo [ERROR] Frontend install FAILED!
+        echo Check your internet connection and try again.
+        echo.
         cd ..
         pause
         exit /b 1
     )
     cd ..
+    echo [OK] Frontend dependencies installed
 ) else (
-    echo [检查] 前端依赖已安装
+    echo [OK] Frontend dependencies found
 )
 
-:: 检查后端依赖
+echo.
+
 if not exist "backend\node_modules" (
-    echo [安装] 首次运行，正在安装后端依赖...
+    echo [INFO] Backend dependencies NOT installed, installing now...
     cd backend
-    call npm ci --production
+    call npm install --production
     if %errorlevel% neq 0 (
-        echo [错误] 后端依赖安装失败
+        echo.
+        echo [ERROR] Backend install FAILED!
+        echo.
         cd ..
         pause
         exit /b 1
     )
     cd ..
+    echo [OK] Backend dependencies installed
 ) else (
-    echo [检查] 后端依赖已安装
+    echo [OK] Backend dependencies found
 )
 
 echo.
 echo ========================================
-echo   正在启动服务...
+echo   Starting services...
 echo ========================================
 echo.
-echo 前端：http://localhost:5173
-echo 后端：http://localhost:3001
+echo Frontend: http://localhost:5173
+echo Backend:  http://localhost:3001
 echo.
-echo 提示：在浏览器右上角设置中配置 API Key
+echo IMPORTANT:
+echo - Do NOT close this black window!
+echo - To stop: press Ctrl+C in this window
+echo - Or double-click: stop-amazon-image-studio.bat
 echo.
-echo 按 Ctrl+C 停止服务
+echo Starting now...
 echo.
 
-:: 启动服务
+:: Step 4: Start services
 call npm run dev
 
+:: If we reach here, npm run dev returned an error
+echo.
+echo ========================================
+echo [ERROR] Failed to start!
+echo ========================================
+echo.
+echo Error code: %errorlevel%
+echo.
+echo Possible causes:
+echo 1. Port 3001 or 5173 already in use
+echo 2. Dependencies corrupted
+echo 3. Node.js version too old
+echo.
+echo Try this:
+echo 1. Double-click stop-amazon-image-studio.bat
+echo 2. Then run this script again
+echo.
 pause
+exit /b 1
