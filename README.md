@@ -84,21 +84,34 @@ npm ci
 
 #### 5. 启动项目
 
-**Windows 用户（推荐）**：
+**方式 A - 快速启动（依赖已安装时）**
+
+如果你已经安装过依赖，直接双击启动：
+
+**Windows 用户**：
 ```bash
 # 双击运行
-start-amazon-image-studio.bat
-
-# 或在命令行执行
-.\start-amazon-image-studio.bat
+start.bat
 ```
 
 **macOS / Linux 用户**：
 ```bash
-# 赋予执行权限（首次）
-chmod +x start-amazon-image-studio.sh
+./start.sh
+```
 
-# 运行
+**方式 B - 完整启动（首次使用或分发给他人的）**
+
+自动检查 Node.js、安装依赖、启动服务：
+
+**Windows 用户**：
+```bash
+# 双击运行
+start-amazon-image-studio.bat
+```
+
+**macOS / Linux 用户**：
+```bash
+chmod +x start-amazon-image-studio.sh
 ./start-amazon-image-studio.sh
 ```
 
@@ -106,6 +119,11 @@ chmod +x start-amazon-image-studio.sh
 ```bash
 npm run dev
 ```
+
+> 💡 **提示**：
+> - `start.bat` / `start.sh` - 快速启动（依赖已安装）
+> - `start-amazon-image-studio.bat` / `start-amazon-image-studio.sh` - 完整启动（自动检查环境 + 安装依赖）
+> - `stop-amazon-image-studio.bat` - 停止服务（关闭所有 Node 进程）
 
 #### 6. 访问应用
 

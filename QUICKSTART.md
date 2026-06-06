@@ -30,6 +30,23 @@ npm run install:all
 
 ### 第 3 步：启动服务（30 秒）
 
+**方式 A - 快速启动（依赖已安装时）**
+
+**Windows 用户**：
+```bash
+# 双击运行
+start.bat
+```
+
+**macOS / Linux 用户**：
+```bash
+./start.sh
+```
+
+**方式 B - 完整启动（首次使用或分发给他人的）**
+
+自动检查 Node.js、安装依赖、启动服务：
+
 **Windows 用户**：
 ```bash
 # 双击运行
@@ -47,6 +64,11 @@ chmod +x start-amazon-image-studio.sh
 ✅ 前端：http://localhost:5173
 ✅ 后端：http://localhost:3001
 ```
+
+> 💡 **提示**：
+> - `start.bat` / `start.sh` - 快速启动（依赖已安装）
+> - `start-amazon-image-studio.bat` / `start-amazon-image-studio.sh` - 完整启动（自动检查环境 + 安装依赖）
+> - `stop-amazon-image-studio.bat` - 停止服务（关闭所有 Node 进程）
 
 ### 第 4 步：配置 API Key（1 分钟）
 
