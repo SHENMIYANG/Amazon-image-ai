@@ -34,6 +34,24 @@ echo.
 
 :: Step 3: Check dependencies
 echo [Step 3] Checking dependencies...
+
+:: Install root dependencies first (concurrently, etc.)
+if not exist "node_modules" (
+    echo [INFO] Installing root dependencies...
+    call npm install
+    if %errorlevel% neq 0 (
+        echo.
+        echo [ERROR] Root install FAILED!
+        echo.
+        pause
+        exit /b 1
+    )
+    echo [OK] Root dependencies installed
+) else (
+    echo [OK] Root dependencies found
+)
+echo.
+
 if not exist "frontend\node_modules" (
     echo [INFO] Frontend dependencies NOT installed, installing now...
     echo This may take 2-3 minutes on first run.
