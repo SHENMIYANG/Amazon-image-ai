@@ -37,7 +37,7 @@ router.post('/', async (req, res) => {
     const uploadsDir = path.join(process.cwd(), 'uploads')
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
 
-    // 最小有效 PNG
+    // 最小有效 PNG（1x1 像素）
     const minimalPng = Buffer.from(
       '89504e470d0a1a0a0000000d49484452000000010000000108020000009001' +
       '2e00000000c4944415478016360f8cfc00000000200016ebe6c5600000000' +
@@ -45,23 +45,27 @@ router.post('/', async (req, res) => {
     )
     fs.writeFileSync(testImagePath, minimalPng)
 
-    const requestBody = {
-      model: OPENAI_MODEL,
-      prompt: 'A simple test image',
-      size: '1024x1024',
-      n: 1,
-      response_format: 'b64_json'
-    }
+    // 使用 /images/edits 接口（图生图）测试
+    const form = new FormData()
+    form.append('model', OPENAI_MODEL)
+    form.append('prompt', 'Professional product photography test, clean background')
+    form.append('size', '1024x1024')
+    form.append('n', '1')
+    form.append('response_format', 'b64_json')
+    form.append('image', fs.createReadStream(testImagePath), {
+      filename: 'test.png',
+      contentType: 'image/png'
+    })
 
     const response = await axios.post(
-      `${OPENAI_BASE_URL}/images/generations`,
-      requestBody,
+      `${OPENAI_BASE_URL}/images/edits`,
+      form,
       {
         headers: {
-          'Content-Type': 'application/json',
+          ...form.getHeaders(),
           'Authorization': `Bearer ${OPENAI_API_KEY}`
         },
-        timeout: 60000
+        timeout: 120000
       }
     )
 

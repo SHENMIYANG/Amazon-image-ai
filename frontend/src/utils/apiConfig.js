@@ -2,7 +2,7 @@ const STORAGE_KEY = 'amazon-image-gen-config'
 
 const defaultConfig = {
   baseUrl: 'https://claudex.me/v1',
-  endpoint: '/images/generations',
+  endpoint: '/images/edits',  // 图生图接口
   apiKey: '',
   model: 'gpt-image-2',
   defaultSize: '2048x2048',
