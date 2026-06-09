@@ -2,30 +2,22 @@ import express from 'express'
 import axios from 'axios'
 import fs from 'fs'
 import path from 'path'
+import FormData from 'form-data'
 
 const router = express.Router()
 
 router.post('/', async (req, res) => {
   try {
-    const { 
-      listing, 
-      imagePlans, 
-      imageType, 
-      style, 
-      resolution, 
-      referenceImages,
-      apiConfig 
-    } = req.body
+    const { listing, imagePlans, style, resolution, referenceImages } = req.body
 
-    // Validate input
+    // 验证输入
     if (!listing || !imagePlans || imagePlans.length === 0) {
-      return res.status(400).json({ 
-        error: 'Invalid input', 
-        message: 'Listing and imagePlans are required' 
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: 'Listing and imagePlans are required'
       })
     }
 
-    // Validate product images (required)
     if (!referenceImages || referenceImages.length === 0) {
       return res.status(400).json({
         error: 'Missing product images',
@@ -33,34 +25,55 @@ router.post('/', async (req, res) => {
       })
     }
 
-    // Validate API Key
-    const apiKey = apiConfig?.apiKey || process.env.OPENAI_API_KEY
-    if (!apiKey) {
+    // 从后端 .env 读取配置，不从前端接收
+    const apiKey = process.env.OPENAI_API_KEY
+    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
+    const model = process.env.OPENAI_MODEL || 'gpt-image-2'
+
+    if (!apiKey || apiKey === 'sk-your-api-key-here') {
       return res.status(400).json({
         error: 'Missing API Key',
-        message: '请先配置 API Key（点击右上角设置）'
+        message: '请在 backend/.env 中配置 OPENAI_API_KEY'
       })
     }
 
-    // Determine resolution
+    // 尺寸
     const size = resolution === '4k' ? '4096x4096' : '2048x2048'
 
-    // Build prompt for each image
-    const generatedImages = []
-    
-    for (const plan of imagePlans) {
-      const prompt = buildAmazonPrompt(listing, plan, style)
-      
-      // Call GPT-Image-2 API with product reference image
-      const imageUrl = await callGPTImage2(prompt, referenceImages[0], size, apiKey, apiConfig)
-      
-      generatedImages.push({
-        imageId: plan.id,
-        imageUrl,
-        prompt,
-        status: 'completed',
-        resolution: size
+    // 参考图路径
+    const refImagePath = path.join(process.cwd(), referenceImages[0].replace('/uploads/', 'uploads/'))
+    if (!fs.existsSync(refImagePath)) {
+      return res.status(400).json({
+        error: 'Reference image not found',
+        message: '参考图片不存在，请重新上传'
       })
+    }
+
+    // 逐张生成
+    const generatedImages = []
+
+    for (const plan of imagePlans) {
+      try {
+        const prompt = buildAmazonPrompt(listing, plan, style)
+        const imageUrl = await callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, model })
+
+        generatedImages.push({
+          imageId: plan.id,
+          imageUrl,
+          prompt,
+          status: 'completed',
+          resolution: size
+        })
+      } catch (err) {
+        console.error(`Plan ${plan.id} failed:`, err.message)
+        generatedImages.push({
+          imageId: plan.id,
+          imageUrl: null,
+          prompt: '',
+          status: 'failed',
+          error: err.message
+        })
+      }
     }
 
     res.json({
@@ -71,11 +84,11 @@ router.post('/', async (req, res) => {
 
   } catch (error) {
     console.error('Generate error:', error.response?.data || error.message)
-    
+
     if (error.response) {
       res.status(error.response.status).json({
-        error: 'GPT-Image-2 API error',
-        message: error.response.data.error?.message || 'Unknown error'
+        error: 'API error',
+        message: error.response.data?.error?.message || 'Unknown error'
       })
     } else {
       res.status(500).json({
@@ -86,67 +99,76 @@ router.post('/', async (req, res) => {
   }
 })
 
-function buildAmazonPrompt(listing, imagePlan, style) {
-  const { 
-    productName, category, targetAudience, sellingPoints, 
-    dimensions, material, sceneRequirements, marketplace 
-  } = listing
+async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, model }) {
+  // 用 multipart/form-data 发送（gpt-image-2 edits 接口标准格式）
+  const form = new FormData()
+  form.append('model', model)
+  form.append('prompt', prompt)
+  form.append('size', size)
+  form.append('n', '1')
+  form.append('response_format', 'b64_json')
+  
+  // 根据实际文件扩展名设置正确的 Content-Type
+  const ext = path.extname(refImagePath).toLowerCase()
+  const contentType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 
+                      ext === '.png' ? 'image/png' : 'image/jpeg'
+  
+  form.append('image', fs.createReadStream(refImagePath), {
+    filename: path.basename(refImagePath),
+    contentType: contentType
+  })
 
-  // Style keywords
+  const response = await axios.post(
+    `${baseUrl}/images/edits`,
+    form,
+    {
+      headers: {
+        ...form.getHeaders(),
+        'Authorization': `Bearer ${apiKey}`
+      },
+      timeout: 120000 // 2分钟超时（生成大图需要时间）
+    }
+  )
+
+  // 把 base64 存为本地文件，返回 URL
+  const b64 = response.data.data[0].b64_json
+  const outputFilename = `generated-${Date.now()}.png`
+  const outputPath = path.join(process.cwd(), 'uploads', outputFilename)
+  fs.writeFileSync(outputPath, Buffer.from(b64, 'base64'))
+
+  return `/uploads/${outputFilename}`
+}
+
+function buildAmazonPrompt(listing, imagePlan, style) {
+  const { productName, category, targetAudience, sellingPoints, dimensions, material, marketplace } = listing
+
   const styleKeywords = style ? getStyleKeywords(style) : ''
 
-  // Base prompt for Amazon
   let prompt = `Professional Amazon product photography for ${productName}`
-  
   prompt += `. Category: ${category}`
-  prompt += `. Target audience: ${targetAudience}`
-  
+
+  if (targetAudience) prompt += `. Target audience: ${targetAudience}`
+
   if (sellingPoints) {
     const points = sellingPoints.split('\n').filter(s => s.trim()).slice(0, 3)
     prompt += `. Key features: ${points.join(', ')}`
   }
-  
-  if (dimensions) {
-    prompt += `. Dimensions: ${dimensions}`
-  }
-  
-  if (material) {
-    prompt += `. Material: ${material}`
-  }
 
-  // Add image plan specifics
-  if (imagePlan.scene) {
-    prompt += `. Scene: ${imagePlan.scene}`
-  }
-  
-  if (imagePlan.composition) {
-    prompt += `. Composition: ${imagePlan.composition}`
-  }
-  
-  if (imagePlan.colorTone) {
-    prompt += `. Color tone: ${imagePlan.colorTone}`
-  }
-  
-  if (imagePlan.elements) {
-    prompt += `. Elements: ${imagePlan.elements}`
-  }
+  if (dimensions) prompt += `. Dimensions: ${dimensions}`
+  if (material) prompt += `. Material: ${material}`
 
-  // Add style keywords
-  if (styleKeywords) {
-    prompt += `. Style: ${styleKeywords}`
-  }
+  if (imagePlan.scene) prompt += `. Scene: ${imagePlan.scene}`
+  if (imagePlan.composition) prompt += `. Composition: ${imagePlan.composition}`
+  if (imagePlan.colorTone) prompt += `. Color tone: ${imagePlan.colorTone}`
+  if (imagePlan.elements) prompt += `. Elements: ${imagePlan.elements}`
 
-  // Marketplace specific requirements
-  if (marketplace === 'US') {
-    prompt += `. US market style, American lifestyle`
-  } else if (marketplace === 'EU') {
-    prompt += `. European market style, minimalist design`
-  } else if (marketplace === 'JP') {
-    prompt += `. Japanese market style, clean and detailed`
-  }
+  if (styleKeywords) prompt += `. Style: ${styleKeywords}`
 
-  // Quality modifiers
-  prompt += '. Ultra high quality, professional commercial photography, 8k resolution, photorealistic, detailed product showcase'
+  if (marketplace === 'US') prompt += `. US market style, American lifestyle`
+  else if (marketplace === 'EU') prompt += `. European market style, minimalist design`
+  else if (marketplace === 'JP') prompt += `. Japanese market style, clean and detailed`
+
+  prompt += '. Ultra high quality, professional commercial photography, photorealistic, detailed product showcase, Amazon listing compliant, no watermarks, no text overlays'
 
   return prompt
 }
@@ -163,42 +185,6 @@ function getStyleKeywords(styleKey) {
     'professional': 'professional, business, corporate, clean, trustworthy'
   }
   return styles[styleKey] || ''
-}
-
-async function callGPTImage2(prompt, referenceImageUrl, size, apiKey, apiConfig) {
-  // Use dynamic config or default to OpenAI
-  const baseUrl = apiConfig?.baseUrl || 'https://api.openai.com/v1'
-  const endpoint = apiConfig?.endpoint || '/images/generations'
-  const model = apiConfig?.model || 'gpt-image-2'
-  const quality = apiConfig?.defaultQuality || 'high'
-
-  // Read the reference image and convert to base64
-  const imagePath = path.join(process.cwd(), referenceImageUrl.replace('/uploads/', 'uploads/'))
-  const imageBuffer = fs.readFileSync(imagePath)
-  const base64Image = imageBuffer.toString('base64')
-  const mimeType = path.extname(imagePath).slice(1)
-
-  const response = await axios.post(
-    `${baseUrl}${endpoint}`,
-    {
-      model: model,
-      prompt: prompt,
-      image: `data:image/${mimeType};base64,${base64Image}`,
-      n: 1,
-      size: size,
-      quality: quality,
-      response_format: 'url'
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      timeout: 60000 // 60 秒超时
-    }
-  )
-
-  return response.data.data[0].url
 }
 
 export default router

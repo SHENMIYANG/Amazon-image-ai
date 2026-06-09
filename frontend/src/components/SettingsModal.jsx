@@ -1,53 +1,45 @@
 import { useState, useEffect } from 'react'
 import './SettingsModal.css'
 
-export default function SettingsModal({ isOpen, onClose, config, onSave }) {
-  const [formData, setFormData] = useState({
-    baseUrl: 'https://api.openai.com/v1',
-    endpoint: '/images/generations',
-    apiKey: '',
-    model: 'gpt-image-2',
-    defaultSize: '2048x2048',
-    defaultQuality: 'high'
-  })
+export default function SettingsModal({ isOpen, onClose }) {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
+  const [status, setStatus] = useState({ configured: false, baseUrl: '-' })
 
   useEffect(() => {
-    if (config) {
-      setFormData(config)
+    if (isOpen) {
+      // 获取后端配置状态
+      fetch('/api/test-api-key/status')
+        .then(res => res.json())
+        .then(data => {
+          setStatus({
+            configured: data.configured,
+            baseUrl: data.baseUrl || '-'
+          })
+        })
+        .catch(() => {
+          setStatus({ configured: false, baseUrl: '无法连接后端' })
+        })
     }
-  }, [config])
-
-  const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
-
-  const handleSave = () => {
-    onSave(formData)
-    onClose()
-  }
+  }, [isOpen])
 
   const handleTest = async () => {
     setTesting(true)
     setTestResult(null)
 
     try {
-      // 通过后端代理测试 API Key（避免 CORS 问题）
       const response = await fetch('/api/test-api-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          baseUrl: formData.baseUrl,
-          apiKey: formData.apiKey,
-          model: formData.model
-        })
+        method: 'POST'
       })
 
       const data = await response.json()
 
       if (response.ok && data.success) {
-        setTestResult({ success: true, message: '✅ API Key 有效！' })
+        setTestResult({ 
+          success: true, 
+          message: '✅ API 配置有效！',
+          testImage: data.testImage
+        })
       } else {
         setTestResult({ 
           success: false, 
@@ -70,108 +62,93 @@ export default function SettingsModal({ isOpen, onClose, config, onSave }) {
     <div className="settings-modal-overlay" onClick={onClose}>
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>⚙️ API 配置</h2>
+          <h2>⚙️ API 配置状态</h2>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
 
         <div className="modal-body">
           <div className="config-section">
-            <h3>🔗 接口配置</h3>
+            <h3>📊 当前配置</h3>
             
-            <div className="form-group">
-              <label>API Base URL</label>
-              <input
-                type="text"
-                value={formData.baseUrl}
-                onChange={e => handleChange('baseUrl', e.target.value)}
-                placeholder="https://api.openai.com/v1"
-              />
-              <small>OpenAI 或兼容接口的基础 URL</small>
+            <div style={{ 
+              padding: '1rem', 
+              background: '#f8f9fa', 
+              borderRadius: '6px',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ marginBottom: '0.5rem' }}>
+                <strong>API Base URL:</strong> {status.baseUrl}
+              </div>
+              <div>
+                <strong>配置状态:</strong>{' '}
+                <span style={{ 
+                  color: status.configured ? '#28a745' : '#dc3545',
+                  fontWeight: 'bold'
+                }}>
+                  {status.configured ? '✅ 已配置' : '❌ 未配置'}
+                </span>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label>API Endpoint</label>
-              <input
-                type="text"
-                value={formData.endpoint}
-                onChange={e => handleChange('endpoint', e.target.value)}
-                placeholder="/images/generations"
-              />
-              <small>Images API 端点</small>
-            </div>
+            <p style={{ 
+              color: '#6c757d', 
+              fontSize: '0.9rem',
+              fontStyle: 'italic'
+            }}>
+              ℹ️ API Key 已配置在后端 .env 文件中，前端无需设置
+            </p>
           </div>
 
           <div className="config-section">
-            <h3>🔑 认证信息</h3>
+            <h3>🧪 测试连接</h3>
             
-            <div className="form-group">
-              <label>API Key *</label>
-              <input
-                type="password"
-                value={formData.apiKey}
-                onChange={e => handleChange('apiKey', e.target.value)}
-                placeholder="sk-proj-..."
-              />
-              <small>你的 OpenAI API Key</small>
-            </div>
-
             <button 
               className="test-btn"
               onClick={handleTest}
-              disabled={testing || !formData.apiKey}
+              disabled={testing}
             >
-              {testing ? '🔄 测试中...' : '🧪 测试连接'}
+              {testing ? '🔄 测试中...' : '测试 API 连接'}
             </button>
 
             {testResult && (
               <div className={`test-result ${testResult.success ? 'success' : 'error'}`}>
-                {testResult.message}
+                <div style={{ marginBottom: testResult.testImage ? '1rem' : '0' }}>
+                  {testResult.message}
+                </div>
+                {testResult.testImage && (
+                  <div style={{ 
+                    marginTop: '1rem', 
+                    padding: '1rem', 
+                    background: '#f8f9fa', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <p style={{ 
+                      margin: '0 0 0.5rem 0', 
+                      fontSize: '0.9rem', 
+                      color: '#6c757d' 
+                    }}>
+                      🖼️ 测试生成图片：
+                    </p>
+                    <img 
+                      src={testResult.testImage} 
+                      alt="测试生成结果" 
+                      style={{ 
+                        maxWidth: '300px', 
+                        maxHeight: '300px', 
+                        borderRadius: '4px',
+                        border: '2px solid #dee2e6'
+                      }} 
+                    />
+                  </div>
+                )}
               </div>
             )}
-          </div>
-
-          <div className="config-section">
-            <h3>🎨 模型配置</h3>
-            
-            <div className="form-group">
-              <label>模型名称</label>
-              <input
-                type="text"
-                value={formData.model}
-                onChange={e => handleChange('model', e.target.value)}
-                placeholder="gpt-image-2"
-              />
-              <small>使用的 AI 模型</small>
-            </div>
-
-            <div className="form-group">
-              <label>默认尺寸</label>
-              <select
-                value={formData.defaultSize}
-                onChange={e => handleChange('defaultSize', e.target.value)}
-              >
-                <option value="1024x1024">1024x1024</option>
-                <option value="2048x2048">2048x2048 (2K)</option>
-                <option value="4096x4096">4096x4096 (4K)</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>默认质量</label>
-              <select
-                value={formData.defaultQuality}
-                onChange={e => handleChange('defaultQuality', e.target.value)}
-              >
-                <option value="standard">Standard</option>
-                <option value="high">High</option>
-              </select>
-            </div>
           </div>
         </div>
 
         <div className="modal-footer">
-          <button className="cancel-btn" onClick={onClose}>取消</button>
-          <button className="save-btn" onClick={handleSave}>💾 保存配置</button>
+          <button className="cancel-btn" onClick={onClose}>关闭</button>
         </div>
       </div>
     </div>

@@ -9,7 +9,6 @@ import ResolutionSelector from './components/ResolutionSelector'
 import ComplianceCheckPanel from './components/ComplianceCheckPanel'
 import SettingsModal from './components/SettingsModal'
 import SettingsButton from './components/SettingsButton'
-import { loadConfig, saveConfig, isConfigured } from './utils/apiConfig'
 import './App.css'
 
 function App() {
@@ -45,16 +44,6 @@ function App() {
   
   // 设置相关状态
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [apiConfig, setApiConfig] = useState(loadConfig())
-  const [showConfigWarning, setShowConfigWarning] = useState(!isConfigured())
-
-  useEffect(() => {
-    // 检查是否已配置 API Key
-    if (!isConfigured()) {
-      setShowConfigWarning(true)
-      setTimeout(() => setShowConfigWarning(false), 8000)
-    }
-  }, [])
 
   const handleListingChange = (field, value) => {
     setListing(prev => ({ ...prev, [field]: value }))
@@ -64,12 +53,6 @@ function App() {
     setImagePlans(prev => prev.map(plan => 
       plan.id === id ? { ...plan, [field]: value } : plan
     ))
-  }
-
-  const handleSaveConfig = (config) => {
-    setApiConfig(config)
-    saveConfig(config)
-    setShowConfigWarning(false)
   }
 
   const handleGenerate = async () => {
@@ -91,7 +74,7 @@ function App() {
 
       const referenceImages = uploadData.images.map(img => img.url)
 
-      // 然后生成图片（传递 API 配置）
+      // 然后生成图片（API 配置在后端 .env 中）
       const generateResponse = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,8 +84,7 @@ function App() {
           imageType: listing.imageType,
           style: selectedStyle,
           resolution: selectedResolution,
-          referenceImages,
-          apiConfig
+          referenceImages
         })
       })
       const data = await generateResponse.json()
@@ -149,8 +131,7 @@ function App() {
           imageType: listing.imageType,
           style: selectedStyle,
           resolution: selectedResolution,
-          referenceImages,
-          apiConfig
+          referenceImages
         })
       })
       const data = await generateResponse.json()
@@ -176,14 +157,6 @@ function App() {
       
       {/* 设置按钮 */}
       <SettingsButton onClick={() => setIsSettingsOpen(true)} />
-      
-      {/* API 配置警告 */}
-      {showConfigWarning && (
-        <div className="config-warning-banner">
-          ⚠️ 请先配置 API Key！点击右上角 ⚙️ 设置
-          <button onClick={() => setIsSettingsOpen(true)}>立即配置</button>
-        </div>
-      )}
       
       <main className="main">
         <section className="section">
@@ -251,11 +224,6 @@ function App() {
               ⚠️ 请先上传产品图并填写产品名称
             </div>
           )}
-          {!isConfigured() && (
-            <div className="generate-hint warning">
-              ⚠️ API Key 未配置，无法生成图片
-            </div>
-          )}
         </section>
 
         <section className="section">
@@ -268,8 +236,6 @@ function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        config={apiConfig}
-        onSave={handleSaveConfig}
       />
     </div>
   )

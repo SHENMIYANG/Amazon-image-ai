@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'amazon-image-gen-config'
 
 const defaultConfig = {
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: 'https://claudex.me/v1',
   endpoint: '/images/generations',
   apiKey: '',
   model: 'gpt-image-2',
