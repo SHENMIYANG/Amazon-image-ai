@@ -27,13 +27,26 @@ router.post('/', async (req, res) => {
 
     // 从后端 .env 读取配置，不从前端接收
     const apiKey = process.env.OPENAI_API_KEY
-    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
-    const model = process.env.OPENAI_MODEL || 'gpt-image-2'
+    const baseUrl = process.env.OPENAI_BASE_URL
+    const model = process.env.OPENAI_MODEL
 
+    // 严格检查配置是否完整
     if (!apiKey || apiKey === 'sk-your-api-key-here') {
-      return res.status(400).json({
+      return res.status(500).json({
         error: 'Missing API Key',
-        message: '请在 backend/.env 中配置 OPENAI_API_KEY'
+        message: '后端未配置 OPENAI_API_KEY，请联系管理员检查 backend/.env'
+      })
+    }
+    if (!baseUrl) {
+      return res.status(500).json({
+        error: 'Missing Base URL',
+        message: '后端未配置 OPENAI_BASE_URL，请联系管理员检查 backend/.env'
+      })
+    }
+    if (!model) {
+      return res.status(500).json({
+        error: 'Missing Model',
+        message: '后端未配置 OPENAI_MODEL，请联系管理员检查 backend/.env'
       })
     }
 
