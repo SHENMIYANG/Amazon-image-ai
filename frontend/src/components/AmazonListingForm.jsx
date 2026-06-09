@@ -18,7 +18,7 @@ export default function AmazonListingForm({ listing, onChange }) {
               placeholder="例如：Wireless Bluetooth Headphones with Noise Cancelling"
               maxLength={200}
             />
-            <span className="char-count">{listing.productName.length}/200</span>
+            <span className="char-count">{(listing.productName || '').length}/200</span>
           </div>
         </div>
 
@@ -111,7 +111,7 @@ export default function AmazonListingForm({ listing, onChange }) {
             rows={5}
           />
           <span className="char-count">
-            {listing.sellingPoints.split('\n').filter(s => s.trim()).length}/5 个卖点
+            {(listing.sellingPoints || '').split('\n').filter(s => s.trim()).length}/5 个卖点
           </span>
         </div>
       </div>
