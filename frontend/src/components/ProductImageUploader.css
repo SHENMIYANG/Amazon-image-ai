@@ -47,9 +47,37 @@
   background: #e7f1ff;
 }
 
+.upload-area.dragging .upload-label {
+  border-color: #28a745;
+  background: #d4edda;
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
+}
+
+.upload-label.compressing {
+  border-color: #ffc107;
+  background: #fff8e1;
+  cursor: wait;
+}
+
 .upload-icon {
   font-size: 3rem;
   margin-bottom: 0.5rem;
+}
+
+.upload-icon.loading {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.95);
+  }
 }
 
 .upload-text {

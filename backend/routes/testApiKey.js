@@ -11,9 +11,9 @@ const router = express.Router()
 
 // 获取配置状态
 router.get('/status', (req, res) => {
-  const { OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL } = process.env
-  const configured = !!(OPENAI_API_KEY && OPENAI_API_KEY !== 'sk-your-api-key-here')
-  res.json({ configured, baseUrl: OPENAI_BASE_URL, model: OPENAI_MODEL })
+  const { IMAGE_GEN_BASE_URL, IMAGE_GEN_API_KEY, IMAGE_GENERATION_MODEL } = process.env
+  const configured = !!(IMAGE_GEN_API_KEY && IMAGE_GEN_API_KEY !== 'sk-your-api-key-here')
+  res.json({ configured, baseUrl: IMAGE_GEN_BASE_URL, model: IMAGE_GENERATION_MODEL })
 })
 
 // 测试接口
@@ -21,16 +21,16 @@ router.post('/', async (req, res) => {
   const testImagePath = path.join(process.cwd(), 'uploads', `test-${Date.now()}.png`)
 
   try {
-    const { OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL } = process.env
+    const { IMAGE_GEN_BASE_URL, IMAGE_GEN_API_KEY, IMAGE_GENERATION_MODEL } = process.env
 
-    if (!OPENAI_API_KEY || OPENAI_API_KEY === 'sk-your-api-key-here') {
-      return res.status(400).json({ success: false, message: '未配置 OPENAI_API_KEY，请检查 backend/.env' })
+    if (!IMAGE_GEN_API_KEY || IMAGE_GEN_API_KEY === 'sk-your-api-key-here') {
+      return res.status(400).json({ success: false, message: '未配置 IMAGE_GEN_API_KEY，请检查 backend/.env' })
     }
-    if (!OPENAI_BASE_URL) {
-      return res.status(400).json({ success: false, message: '未配置 OPENAI_BASE_URL，请检查 backend/.env' })
+    if (!IMAGE_GEN_BASE_URL) {
+      return res.status(400).json({ success: false, message: '未配置 IMAGE_GEN_BASE_URL，请检查 backend/.env' })
     }
-    if (!OPENAI_MODEL) {
-      return res.status(400).json({ success: false, message: '未配置 OPENAI_MODEL，请检查 backend/.env' })
+    if (!IMAGE_GENERATION_MODEL) {
+      return res.status(400).json({ success: false, message: '未配置 IMAGE_GENERATION_MODEL，请检查 backend/.env' })
     }
 
     // 确保 uploads 目录存在
@@ -47,7 +47,7 @@ router.post('/', async (req, res) => {
 
     // 使用 /images/edits 接口（图生图）测试
     const form = new FormData()
-    form.append('model', OPENAI_MODEL)
+    form.append('model', IMAGE_GENERATION_MODEL)
     form.append('prompt', 'Professional product photography test, clean background')
     form.append('size', '1024x1024')
     form.append('n', '1')
@@ -58,12 +58,12 @@ router.post('/', async (req, res) => {
     })
 
     const response = await axios.post(
-      `${OPENAI_BASE_URL}/images/edits`,
+      `${IMAGE_GEN_BASE_URL}/images/edits`,
       form,
       {
         headers: {
           ...form.getHeaders(),
-          'Authorization': `Bearer ${OPENAI_API_KEY}`
+          'Authorization': `Bearer ${IMAGE_GEN_API_KEY}`
         },
         timeout: 120000
       }

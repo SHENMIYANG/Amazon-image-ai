@@ -1,7 +1,10 @@
 import './ComplianceCheck.css'
 
-export default function ComplianceCheckPanel({ listing, imagePlans, imageType }) {
-  if (!listing || !imagePlans || imagePlans.length === 0) {
+export default function ComplianceCheckPanel({ listing, imageType }) {
+  // imagePlans 现在在 listing.imagePlans 中
+  const imagePlans = listing.imagePlans || []
+  
+  if (!listing || imagePlans.length === 0) {
     return null
   }
 
@@ -23,13 +26,13 @@ export default function ComplianceCheckPanel({ listing, imagePlans, imageType })
   }
 
   // 执行合规检查
-  const checkResult = window.amazonCompliance.batchComplianceCheck(
+  const checkResult = window.amazonCompliance?.batchComplianceCheck?.(
     imagePlans,
     listing,
     imageType
   )
 
-  if (!checkResult || checkResult.images.length === 0) {
+  if (!checkResult || !checkResult.images || checkResult.images.length === 0) {
     return (
       <div className="compliance-result">
         <div className="compliance-summary pass">

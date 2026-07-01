@@ -26,3 +26,42 @@
   cursor: not-allowed;
   transform: none;
 }
+
+.generate-button-container {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.generate-button-container .generate-button {
+  flex: 1;
+}
+
+.stop-button {
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);
+  white-space: nowrap;
+}
+
+.stop-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+}
+
+.stop-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.stop-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}

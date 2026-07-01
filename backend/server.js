@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import generateRoutes from './routes/generate.js'
 import uploadRoutes from './routes/upload.js'
 import testApiKeyRoutes from './routes/testApiKey.js'
+import agentAnalyzeRoutes from './routes/agent-analyze.js'
 
 dotenv.config()
 
@@ -24,6 +25,7 @@ app.use(express.json())
 app.use('/api/upload', uploadRoutes)
 app.use('/api/generate', generateRoutes)
 app.use('/api/test-api-key', testApiKeyRoutes)
+app.use('/api/agent-analyze', agentAnalyzeRoutes)
 
 // Serve uploaded images (development)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
