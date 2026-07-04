@@ -183,7 +183,7 @@ function App() {
               listing, 
               imagePlans: [plan],
               imageType: listing.imageType,
-              complexity: selectedComplexity,  // 添加复杂度参数
+              complexity: listing.complexity || 'L2',  // 使用 listing.complexity 而不是 selectedComplexity
               // style: selectedStyle,  // 已删除：冗余
               resolution: selectedResolution,
               referenceImages
@@ -315,6 +315,7 @@ function App() {
           listing, 
           imagePlans: [planToUse],
           imageType: listing.imageType,
+          complexity: task.listing?.complexity || listing.complexity || 'L2',  // 添加复杂度参数
           // style: selectedStyle,  // 已删除：冗余
           resolution: selectedResolution,
           referenceImages: task.referenceImages || []

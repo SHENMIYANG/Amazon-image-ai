@@ -112,10 +112,6 @@ export default function TemplateSelector({ selectedType, onSelect, hasGeneratedP
     onSelect(strategyKey)
   }
 
-  // 获取当前策略支持的复杂度
-  const currentStrategy = strategies.find(s => s.key === selectedType)
-  const supportedComplexities = currentStrategy?.complexitySupport || ['L1', 'L2', 'L3']
-
   return (
     <div className="template-selector">
       <div className="template-selector-header">
@@ -128,7 +124,8 @@ export default function TemplateSelector({ selectedType, onSelect, hasGeneratedP
       {/* 策略卡片网格 */}
       <div className="template-grid strategy-grid">
         {strategies.map(strategy => {
-          const isSupported = !selectedComplexity || supportedComplexities.includes(selectedComplexity)
+          // 使用当前渲染的 strategy 的 complexitySupport，而不是 selectedType 的
+          const isSupported = !selectedComplexity || (strategy.complexitySupport || ['L1', 'L2', 'L3']).includes(selectedComplexity)
           const isAiRecommended = aiRecommendedStrategy === strategy.key
           return (
             <div
