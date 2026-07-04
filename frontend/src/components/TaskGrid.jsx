@@ -29,10 +29,22 @@ export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAl
 function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue }) {
   const [editingImageId, setEditingImageId] = useState(null)
   const [editedPrompt, setEditedPrompt] = useState('')
+  const [previewImage, setPreviewImage] = useState(null)
+  const [previewZoom, setPreviewZoom] = useState(1)
 
   const handleEditPrompt = (img) => {
     setEditingImageId(img.imageId)
     setEditedPrompt(img.prompt || '')
+  }
+
+  const handleOpenPreview = (img) => {
+    setPreviewImage(img)
+    setPreviewZoom(1)
+  }
+
+  const handleClosePreview = () => {
+    setPreviewImage(null)
+    setPreviewZoom(1)
   }
 
   const handleSavePrompt = () => {
@@ -113,7 +125,13 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
               
               <div className="image-content">
                 {img.imageUrl ? (
-                  <img src={img.imageUrl} alt={`生成的图片 ${img.imageId}`} />
+                  <button
+                    className="image-preview-button"
+                    onClick={() => handleOpenPreview(img)}
+                    title="点击查看大图"
+                  >
+                    <img src={img.imageUrl} alt={`生成的图片 ${img.imageId}`} />
+                  </button>
                 ) : img.status === 'failed' ? (
                   <div className="image-error">
                     <span>❌ 生成失败</span>
@@ -126,13 +144,22 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
               
               <div className="image-card-actions">
                 {img.imageUrl && (
-                  <button
-                    className="action-btn download"
-                    onClick={() => onDownload?.(img.imageUrl, `image-${img.imageId}.png`)}
-                    title="下载这张"
-                  >
-                    📥
-                  </button>
+                  <>
+                    <button
+                      className="action-btn preview"
+                      onClick={() => handleOpenPreview(img)}
+                      title="查看大图"
+                    >
+                      🔍
+                    </button>
+                    <button
+                      className="action-btn download"
+                      onClick={() => onDownload?.(img.imageUrl, `image-${img.imageId}.png`)}
+                      title="下载这张"
+                    >
+                      📥
+                    </button>
+                  </>
                 )}
                 {img.status === 'failed' && (
                   <button
@@ -184,6 +211,46 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
           <div className="task-placeholder">暂无图片</div>
         )}
       </div>
+
+      {previewImage && (
+        <div className="image-preview-modal" onClick={handleClosePreview}>
+          <div className="image-preview-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="image-preview-toolbar">
+              <div className="image-preview-title">
+                图 {previewImage.imageId} 预览
+              </div>
+              <div className="image-preview-controls">
+                <button
+                  onClick={() => setPreviewZoom(prev => Math.max(0.5, prev - 0.25))}
+                  title="缩小"
+                >
+                  -
+                </button>
+                <span>{Math.round(previewZoom * 100)}%</span>
+                <button
+                  onClick={() => setPreviewZoom(prev => Math.min(3, prev + 0.25))}
+                  title="放大"
+                >
+                  +
+                </button>
+                <button onClick={() => setPreviewZoom(1)} title="恢复原始比例">
+                  100%
+                </button>
+                <button onClick={handleClosePreview} title="关闭">
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="image-preview-stage">
+              <img
+                src={previewImage.imageUrl}
+                alt={`生成的图片 ${previewImage.imageId} 大图预览`}
+                style={{ transform: `scale(${previewZoom})` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

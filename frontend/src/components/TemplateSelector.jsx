@@ -104,6 +104,8 @@ const COMPLEXITY_LEVELS = [
 ]
 
 export default function TemplateSelector({ selectedType, onSelect, hasGeneratedPlans, selectedComplexity, onComplexityChange, aiRecommendedStrategy, onDismissRecommendation }) {
+  const selectedStrategy = strategies.find(strategy => strategy.key === selectedType)
+
   const handleSelect = (strategyKey) => {
     if (hasGeneratedPlans && selectedType !== strategyKey) {
       const confirmed = window.confirm('切换策略将覆盖当前已生成的图片策略，确定要切换吗？\n\n点击"确定"切换策略\n点击"取消"保留当前策略')
@@ -191,7 +193,7 @@ export default function TemplateSelector({ selectedType, onSelect, hasGeneratedP
         
         <div className="complexity-options">
           {COMPLEXITY_LEVELS.map(level => {
-            const isDisabled = currentStrategy && !currentStrategy.complexitySupport.includes(level.id)
+            const isDisabled = selectedStrategy && !selectedStrategy.complexitySupport.includes(level.id)
             return (
               <button
                 key={level.id}

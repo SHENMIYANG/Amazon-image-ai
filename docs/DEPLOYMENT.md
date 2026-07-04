@@ -73,7 +73,14 @@
    ```env
    NODE_ENV=production
    BACKEND_PORT=3001
-   OPENAI_API_KEY=sk-proj-your-api-key-here
+   IMAGE_GEN_API_KEY=sk-your-api-key-here
+   IMAGE_GEN_BASE_URL=https://claudex.me/v1
+   IMAGE_GENERATION_MODEL=gpt-image-2
+
+   # 可选：用于 AI 策略分析
+   AGENT_API_KEY=sk-your-api-key-here
+   AGENT_BASE_URL=https://claudex.me/v1
+   AGENT_MODEL=gpt-5.4-mini
    ```
 
 4. **启动服务**
@@ -141,7 +148,7 @@ pm2 delete amazon-image-studio
 2. **启动服务**
    ```bash
    # 方式一：使用环境变量
-   OPENAI_API_KEY=sk-proj-xxx docker-compose up -d
+   IMAGE_GEN_API_KEY=sk-your-api-key-here IMAGE_GEN_BASE_URL=https://claudex.me/v1 IMAGE_GENERATION_MODEL=gpt-image-2 docker-compose up -d
    
    # 方式二：编辑 .env 文件
    docker-compose up -d
@@ -167,8 +174,12 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - BACKEND_PORT=3001
+      - IMAGE_GEN_API_KEY=${IMAGE_GEN_API_KEY}
+      - IMAGE_GEN_BASE_URL=${IMAGE_GEN_BASE_URL}
+      - IMAGE_GENERATION_MODEL=${IMAGE_GENERATION_MODEL}
+      - AGENT_API_KEY=${AGENT_API_KEY}
+      - AGENT_BASE_URL=${AGENT_BASE_URL}
+      - AGENT_MODEL=${AGENT_MODEL}
     restart: always
     volumes:
       - ./logs:/app/logs
@@ -202,7 +213,10 @@ services:
    ```
 
 3. **配置环境变量**
-   - 在 Vercel 控制台添加 `OPENAI_API_KEY`
+   - 在 Vercel 控制台添加 `IMAGE_GEN_API_KEY`
+   - 添加 `IMAGE_GEN_BASE_URL`
+   - 添加 `IMAGE_GENERATION_MODEL`
+   - 如需 AI 策略分析，添加 `AGENT_API_KEY`、`AGENT_BASE_URL`、`AGENT_MODEL`
 
 ### Railway 部署（一键部署）
 
@@ -212,7 +226,10 @@ services:
    - 选择 `Amazon-image-ai` 仓库
 
 2. **配置环境变量**
-   - 添加 `OPENAI_API_KEY`
+   - 添加 `IMAGE_GEN_API_KEY`
+   - 添加 `IMAGE_GEN_BASE_URL`
+   - 添加 `IMAGE_GENERATION_MODEL`
+   - 如需 AI 策略分析，添加 `AGENT_API_KEY`、`AGENT_BASE_URL`、`AGENT_MODEL`
    - 添加 `NODE_ENV=production`
 
 3. **自动部署**
@@ -229,7 +246,10 @@ services:
    - Start Command: `npm start`
 
 3. **环境变量**
-   - 添加 `OPENAI_API_KEY`
+   - 添加 `IMAGE_GEN_API_KEY`
+   - 添加 `IMAGE_GEN_BASE_URL`
+   - 添加 `IMAGE_GENERATION_MODEL`
+   - 如需 AI 策略分析，添加 `AGENT_API_KEY`、`AGENT_BASE_URL`、`AGENT_MODEL`
 
 ### 优点
 - 无需维护服务器

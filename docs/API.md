@@ -57,10 +57,15 @@
 创建 `backend/.env` 文件：
 
 ```env
-# OpenAI API 配置
-OPENAI_API_KEY=sk-proj-your-api-key-here
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-image-2
+# 图像生成 API 配置（必需）
+IMAGE_GEN_API_KEY=sk-your-api-key-here
+IMAGE_GEN_BASE_URL=https://claudex.me/v1
+IMAGE_GENERATION_MODEL=gpt-image-2
+
+# Agent 文本分析 API 配置（可选，用于 AI 策略推荐）
+AGENT_API_KEY=sk-your-api-key-here
+AGENT_BASE_URL=https://claudex.me/v1
+AGENT_MODEL=gpt-5.4-mini
 
 # 服务配置
 BACKEND_PORT=3001
