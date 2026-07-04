@@ -14,11 +14,11 @@ RUN cd frontend && npm install && npm run build
 COPY backend/package*.json ./backend/
 RUN cd backend && npm install --production
 
-# Copy built frontend to backend
-COPY frontend/dist ./backend/frontend/dist
-
 # Copy backend code (excluding .env due to .dockerignore)
 COPY backend/ ./backend/
+
+# Frontend build output is already at /app/frontend/dist (from line 11)
+# Backend serves it from there, no need to copy
 
 WORKDIR /app/backend
 

@@ -202,14 +202,14 @@ Local: http://localhost:5173/
 
 ### 图像生成 API ✅
 ```env
-IMAGE_GEN_API_KEY=sk-4949f86a91db7bd5198ef102ba4b92674a38e2f52de82941afa4c86b1f002bb6
+IMAGE_GEN_API_KEY=sk-your-api-key-here  # ⚠️ 请替换为你的真实密钥
 IMAGE_GEN_BASE_URL=https://claudex.me/v1
 IMAGE_GENERATION_MODEL=gpt-image-2
 ```
 
 ### Agent 文本分析 API ⚠️
 ```env
-AGENT_API_KEY=sk-4949f86a91db7bd5198ef102ba4b92674a38e2f52de82941afa4c86b1f002bb6
+AGENT_API_KEY=sk-your-api-key-here  # ⚠️ 请替换为你的真实密钥
 AGENT_BASE_URL=https://claudex.me/v1
 AGENT_MODEL=gpt-5.4-mini
 ```

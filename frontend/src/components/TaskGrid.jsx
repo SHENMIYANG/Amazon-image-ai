@@ -26,7 +26,7 @@ export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAl
   )
 }
 
-function TaskCard({ task, onRegenerate, onDownload, onDownloadAll }) {
+function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue }) {
   const [editingImageId, setEditingImageId] = useState(null)
   const [editedPrompt, setEditedPrompt] = useState('')
 
