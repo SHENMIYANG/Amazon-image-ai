@@ -19,6 +19,7 @@ export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAl
           onRegenerate={onRegenerate}
           onDownload={onDownload}
           onDownloadAll={onDownloadAll}
+          onContinue={onContinue}
         />
       ))}
     </div>

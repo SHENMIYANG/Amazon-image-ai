@@ -6,7 +6,7 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
   const [error, setError] = useState(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [successMessage, setSuccessMessage] = useState(null)
-  const [recommendedStrategy, setRecommendedStrategy] = useState(null)
+  const [recommendation, setRecommendation] = useState(null)
   const timerRef = useRef(null)
 
   // 分析过程中每秒更新计时
@@ -71,10 +71,14 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
       onAnalyzeComplete(result.data)
 
       // 显示成功提示
-      setSuccessMessage(`✅ 策略生成成功！共生成 7 张图的详细策略`)
+      setSuccessMessage(`✅ 策略生成成功！AI 已为 7 张图片生成详细策略`)
       
-      // 如果 AI 推荐了不同的策略，显示推荐提示
-      if (result.data._meta?.recommendedStrategy && result.data._meta.recommendedStrategy !== listing.imageType) {
+      // 只有当 AI 推荐的策略与用户手动选择的不同时，才显示推荐提示
+      const usedStrategy = result.data._meta?.strategyUsed
+      const recommendedStrategy = result.data._meta?.recommendedStrategy
+      
+      // 用户手动选了策略，但 AI 推荐了另一个
+      if (listing.imageType && recommendedStrategy && recommendedStrategy !== listing.imageType) {
         const strategyNames = {
           basic: ' 通用基础型',
           featureFocus: '🔥 卖点聚焦型',
@@ -84,20 +88,26 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
           premium: '💎 高端奢华型',
           fashion: '👗 时尚潮流型'
         }
-        setRecommendedStrategy(strategyNames[result.data._meta.recommendedStrategy] || result.data._meta.recommendedStrategy)
+        const userStrategyName = strategyNames[listing.imageType] || listing.imageType
+        const aiRecommendedName = strategyNames[recommendedStrategy] || recommendedStrategy
+        
+        setRecommendation({
+          user: userStrategyName,
+          ai: aiRecommendedName
+        })
       }
 
       // 5 秒后自动清除成功提示
       setTimeout(() => {
         setSuccessMessage(null)
-        setRecommendedStrategy(null)
+        setRecommendation(null)
       }, 5000)
 
     } catch (err) {
       console.error('Agent 分析失败:', err)
       setError(err.message)
       setSuccessMessage(null)
-      setRecommendedStrategy(null)
+      setRecommendation(null)
       
       // 根据错误类型给出不同提示
       if (err.message.includes('500') || err.message.includes('Internal Server Error')) {
@@ -146,9 +156,9 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
       {successMessage && (
         <div className="success-message">
           {successMessage}
-          {recommendedStrategy && (
+          {recommendation && (
             <div className="recommendation-hint">
-              💡 AI 根据你的产品推荐：<strong>{recommendedStrategy}</strong> 策略
+              💡 你选择了 <strong>{recommendation.user}</strong>，但 AI 更推荐 <strong>{recommendation.ai}</strong>
             </div>
           )}
         </div>

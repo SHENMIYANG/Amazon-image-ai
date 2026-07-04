@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import AmazonListingForm from './components/AmazonListingForm'
 import ProductImageUploader from './components/ProductImageUploader'
 import TaskGrid from './components/TaskGrid'
@@ -39,6 +39,9 @@ function App() {
   const [stopping, setStopping] = useState(false) // 停止标志
   const [currentTaskId, setCurrentTaskId] = useState(null) // 当前生成中的任务 ID
   
+  // 使用 ref 存储 stopping 状态，避免异步循环中捕获旧值
+  const stoppingRef = useRef(false)
+  
   // 设置相关状态
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
@@ -48,12 +51,13 @@ function App() {
 
   // 处理 Agent 分析完成
   const handleAgentAnalyzeComplete = (analysisResult) => {
-    const { imagePlans, sellingPointsAnalysis } = analysisResult
+    const { imagePlans, sellingPointsAnalysis, _meta } = analysisResult
     
     // 只更新 imagePlans，不覆盖用户选择的风格
     setListing(prev => ({
       ...prev,
-      imagePlans: imagePlans
+      imagePlans: imagePlans,
+      _meta: _meta  // 保存元数据（包含 AI 推荐策略）
       // 注意：不使用 recommendedTemplate 覆盖用户的 imageType 选择
     }))
     
@@ -66,6 +70,7 @@ function App() {
   const handleGenerate = async () => {
     setGenerating(true)
     setStopping(false)
+    stoppingRef.current = false
     
     // 验证：检查是否所有 7 张图都有策略
     const allPlans = [...(listing.imagePlans || [])]
@@ -138,7 +143,7 @@ function App() {
         const plan = allPlans[i]
         
         // 检查是否点了停止
-        if (stopping) {
+        if (stoppingRef.current) {
           console.log('用户取消生成')
           aborted = true
           setTasks(prev => prev.map(task => {
@@ -378,6 +383,7 @@ function App() {
   const handleStop = () => {
     if (currentTaskId) {
       setStopping(true)
+      stoppingRef.current = true
       setTasks(prev => prev.map(task => {
         if (task.id === currentTaskId) {
           return { ...task, status: 'stopping' }
@@ -391,9 +397,11 @@ function App() {
   const handleContinue = async (task) => {
     if (!task || task.status !== 'stopped') return
     
-    const taskId = Date.now()
+    // 继续使用原任务 ID，不要创建新的
+    const taskId = task.id
     setCurrentTaskId(taskId)
     setStopping(false)
+    stoppingRef.current = false
     
     // 找到未完成的图片
     const pendingPlans = task.images
@@ -420,7 +428,7 @@ function App() {
     for (let i = 0; i < pendingPlans.length; i++) {
       const plan = pendingPlans[i]
       
-      if (stopping) {
+      if (stoppingRef.current) {
         console.log('用户取消生成')
         aborted = true
         setTasks(prev => prev.map(t => {

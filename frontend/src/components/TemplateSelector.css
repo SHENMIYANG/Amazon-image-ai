@@ -65,6 +65,32 @@
   z-index: 10;
 }
 
+/* AI 推荐策略高亮 */
+.template-card.ai-recommended {
+  border-color: #9c27b0;
+  box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.2);
+}
+
+.template-card.ai-recommended:hover {
+  box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.3), 0 6px 20px rgba(156, 39, 176, 0.4);
+}
+
+.ai-recommended-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: linear-gradient(135deg, #9c27b0, #673ab7);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .template-preview {
   width: 100%;
   height: 120px;
@@ -371,5 +397,145 @@
 
   .complexity-btn {
     min-width: unset;
+  }
+}
+
+/* ========== AI 推荐弹窗 ========== */
+.ai-recommendation-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.ai-recommendation-modal {
+  background: white;
+  border-radius: 16px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease-out;
+  overflow: hidden;
+}
+
+.modal-header {
+  background: linear-gradient(135deg, #9c27b0, #673ab7);
+  color: white;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.modal-content {
+  padding: 2rem;
+  text-align: center;
+}
+
+.recommendation-title {
+  font-size: 1rem;
+  color: #555;
+  margin-bottom: 1.5rem;
+}
+
+.recommended-strategy-highlight {
+  background: linear-gradient(135deg, #f3e5f5, #e1bee7);
+  border: 2px dashed #9c27b0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.recommended-strategy-highlight .strategy-icon {
+  font-size: 3rem;
+}
+
+.recommended-strategy-highlight .strategy-name {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #9c27b0;
+}
+
+.recommendation-reason {
+  font-size: 0.9rem;
+  color: #666;
+  line-height: 1.6;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: #f8f9fa;
+}
+
+.modal-actions .btn-cancel {
+  flex: 1;
+  padding: 0.875rem 1.5rem;
+  background: linear-gradient(135deg, #4caf50, #45a049);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.modal-actions .btn-cancel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.modal-actions .btn-secondary {
+  flex: 1;
+  padding: 0.875rem 1.5rem;
+  background: white;
+  color: #666;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.modal-actions .btn-secondary:hover {
+  border-color: #999;
+  color: #333;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }

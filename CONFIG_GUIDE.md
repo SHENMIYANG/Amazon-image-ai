@@ -20,7 +20,7 @@
 #### 方案 A: claudex.me（当前使用）
 
 ```env
-IMAGE_GEN_API_KEY=sk-4949f86a91db7bd5198ef102ba4b92674a38e2f52de82941afa4c86b1f002bb6
+IMAGE_GEN_API_KEY=sk-your-api-key-here  # ⚠️ 替换为你的真实密钥
 IMAGE_GEN_BASE_URL=https://claudex.me/v1
 IMAGE_GENERATION_MODEL=gpt-image-2
 ```

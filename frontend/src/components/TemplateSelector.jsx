@@ -103,7 +103,7 @@ const COMPLEXITY_LEVELS = [
   { id: 'L3', name: '精品版 🏆', icon: '🏆', desc: '信息图 + 对比图 + 情绪化场景，适合重点推广', cost: '高' }
 ]
 
-export default function TemplateSelector({ selectedType, onSelect, hasGeneratedPlans, selectedComplexity, onComplexityChange }) {
+export default function TemplateSelector({ selectedType, onSelect, hasGeneratedPlans, selectedComplexity, onComplexityChange, aiRecommendedStrategy, onDismissRecommendation }) {
   const handleSelect = (strategyKey) => {
     if (hasGeneratedPlans && selectedType !== strategyKey) {
       const confirmed = window.confirm('切换策略将覆盖当前已生成的图片策略，确定要切换吗？\n\n点击"确定"切换策略\n点击"取消"保留当前策略')
@@ -129,15 +129,16 @@ export default function TemplateSelector({ selectedType, onSelect, hasGeneratedP
       <div className="template-grid strategy-grid">
         {strategies.map(strategy => {
           const isSupported = !selectedComplexity || supportedComplexities.includes(selectedComplexity)
+          const isAiRecommended = aiRecommendedStrategy === strategy.key
           return (
             <div
               key={strategy.key}
-              className={`template-card ${selectedType === strategy.key ? 'active' : ''} ${strategy.recommended ? 'recommended' : ''} ${!isSupported ? 'disabled' : ''}`}
+              className={`template-card ${selectedType === strategy.key ? 'active' : ''} ${isAiRecommended ? 'ai-recommended' : ''} ${!isSupported ? 'disabled' : ''}`}
               onClick={() => isSupported && handleSelect(strategy.key)}
               title={!isSupported ? `该策略不支持 ${selectedComplexity} 复杂度` : ''}
             >
-              {strategy.recommended && (
-                <div className="recommended-badge">⭐ 推荐</div>
+              {isAiRecommended && (
+                <div className="ai-recommended-badge">🤖 AI 推荐</div>
               )}
               
               <div className="template-preview">
@@ -219,6 +220,54 @@ export default function TemplateSelector({ selectedType, onSelect, hasGeneratedP
         <br/>
         <small>例如：智能空气炸锅 → Technical + Lifestyle | 记忆棉床垫 → Premium + Lifestyle</small>
       </div>
+
+      {/* AI 推荐策略弹窗 */}
+      {aiRecommendedStrategy && (
+        <div className="ai-recommendation-modal-overlay">
+          <div className="ai-recommendation-modal">
+            <div className="modal-header">
+              <h3>🤖 AI 策略推荐</h3>
+            </div>
+            <div className="modal-content">
+              <p className="recommendation-title">根据你的产品特点，AI 更推荐：</p>
+              <div className="recommended-strategy-highlight">
+                {(() => {
+                  const rec = strategies.find(s => s.key === aiRecommendedStrategy)
+                  return rec ? (
+                    <>
+                      <span className="strategy-icon">{rec.icon}</span>
+                      <span className="strategy-name">{rec.name}</span>
+                    </>
+                  ) : null
+                })()}
+              </div>
+              <p className="recommendation-reason">
+                💡 该策略更适合你的产品特性和目标市场
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button 
+                className="btn-cancel" 
+                onClick={() => {
+                  onSelect(aiRecommendedStrategy)
+                  // 关闭弹窗由父组件的 useEffect 处理（用户选择后清除推荐）
+                }}
+              >
+                ✅ 采纳 AI 推荐
+              </button>
+              <button 
+                className="btn-secondary" 
+                onClick={() => {
+                  // 用户点击"我知道了"，通知父组件关闭弹窗
+                  onDismissRecommendation?.()
+                }}
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

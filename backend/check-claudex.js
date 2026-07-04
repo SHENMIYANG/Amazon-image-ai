@@ -1,8 +1,10 @@
 import axios from 'axios'
 
 async function checkAPI() {
-  const apiKey = 'sk-4949f86a91db7bd5198ef102ba4b92674a38e2f52de82941afa4c86b1f002bb6'
-  const baseUrl = 'https://claudex.me/v1'
+  // ⚠️ 注意：不要在此文件中硬编码密钥！
+  // 请使用环境变量：IMAGE_GEN_API_KEY 或 AGENT_API_KEY
+  const apiKey = process.env.IMAGE_GEN_API_KEY || process.env.AGENT_API_KEY || 'sk-your-api-key-here'
+  const baseUrl = process.env.IMAGE_GEN_BASE_URL || process.env.AGENT_BASE_URL || 'https://claudex.me/v1'
   
   try {
     console.log('=== 检查 claudex.me API ===\n')

@@ -1,7 +1,19 @@
 import './AmazonListingForm.css'
 import TemplateSelector from './TemplateSelector'
+import { useState, useEffect } from 'react'
 
 export default function AmazonListingForm({ listing, onChange }) {
+  const [aiRecommendedStrategy, setAiRecommendedStrategy] = useState(null)
+  
+  // 监听 AI 推荐策略变化
+  useEffect(() => {
+    if (listing._meta?.recommendedStrategy && listing._meta.recommendedStrategy !== listing.imageType) {
+      setAiRecommendedStrategy(listing._meta.recommendedStrategy)
+    } else {
+      setAiRecommendedStrategy(null)
+    }
+  }, [listing._meta?.recommendedStrategy, listing.imageType])
+  
   // 套图模板预设 - 专业亚马逊排版风格（参考标准 7 图框架）
   const imageTemplates = {
     // 基础套图 - 专业亚马逊 7 图框架（只有图 2 展示卖点，其他图各司其职）
@@ -105,6 +117,8 @@ export default function AmazonListingForm({ listing, onChange }) {
     if (imageTemplates[templateKey]) {
       onChange('imagePlans', imageTemplates[templateKey])
       onChange('imageType', templateKey)
+      // 用户手动选择策略后，清除 AI 推荐（因为用户已经做了选择）
+      setAiRecommendedStrategy(null)
     }
   }
   
@@ -280,6 +294,8 @@ export default function AmazonListingForm({ listing, onChange }) {
           hasGeneratedPlans={listing.imagePlans && listing.imagePlans.length > 0}
           selectedComplexity={listing.complexity || 'L2'}
           onComplexityChange={(level) => onChange('complexity', level)}
+          aiRecommendedStrategy={aiRecommendedStrategy}
+          onDismissRecommendation={() => setAiRecommendedStrategy(null)}
         />
         
         <p className="section-help">

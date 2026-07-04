@@ -1,8 +1,10 @@
 import OpenAI from 'openai'
 
+// ⚠️ 注意：不要在此文件中硬编码密钥！
+// 请使用环境变量：IMAGE_GEN_API_KEY 或 AGENT_API_KEY
 const openai = new OpenAI({
-  apiKey: 'sk-4949f86a91db7bd5198ef102ba4b92674a38e2f52de82941afa4c86b1f002bb6',
-  baseURL: 'https://claudex.me/v1'
+  apiKey: process.env.IMAGE_GEN_API_KEY || process.env.AGENT_API_KEY || 'sk-your-api-key-here',
+  baseURL: process.env.IMAGE_GEN_BASE_URL || process.env.AGENT_BASE_URL || 'https://claudex.me/v1'
 })
 
 async function testModels() {

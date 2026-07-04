@@ -9,7 +9,8 @@ const router = express.Router()
 
 router.post('/', async (req, res) => {
   try {
-    const { listing, imagePlans, style, resolution, referenceImages, complexity } = req.body
+    // 注意：前端发送 imageType，不是 style
+    const { listing, imagePlans, imageType, resolution, referenceImages, complexity } = req.body
 
     // 验证输入
     if (!listing || !imagePlans || imagePlans.length === 0) {
@@ -68,7 +69,7 @@ router.post('/', async (req, res) => {
 
     for (const plan of imagePlans) {
       try {
-        const prompt = buildAmazonPrompt(listing, plan, style, complexity || 'L2', size)
+        const prompt = buildAmazonPrompt(listing, plan, imageType, complexity || 'L2', size)
         const imageUrl = await callGPTImage2({ 
           prompt, 
           refImagePath: hasReferenceImages ? refImagePath : null, 
@@ -91,7 +92,7 @@ router.post('/', async (req, res) => {
           imageId: plan.id,
           status: 'failed',
           error: err.response?.data?.message || err.message,
-          prompt: buildAmazonPrompt(listing, plan, style, complexity || 'L2', size)
+          prompt: buildAmazonPrompt(listing, plan, imageType, complexity || 'L2', size)
         })
       }
     }
@@ -165,11 +166,11 @@ async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, mode
   return `/uploads/${outputFilename}`
 }
 
-function buildAmazonPrompt(listing, imagePlan, style, complexity = 'L2', resolution = '2048x2048') {
+function buildAmazonPrompt(listing, imagePlan, imageType, complexity = 'L2', resolution = '2048x2048') {
   const { productName, category, targetAudience, sellingPoints, dimensions, material, marketplace, fontPreference, designNotes, additionalInfo } = listing
 
   // 获取策略库中的视觉风格
-  const strategy = STRATEGY_LIBRARY[style]
+  const strategy = STRATEGY_LIBRARY[imageType]
   const visualStyle = strategy?.visualStyle || {}
   
   // 字体映射

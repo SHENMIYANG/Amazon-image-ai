@@ -7,7 +7,12 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - IMAGE_GEN_API_KEY=${IMAGE_GEN_API_KEY}
+      - IMAGE_GEN_BASE_URL=${IMAGE_GEN_BASE_URL}
+      - IMAGE_GENERATION_MODEL=${IMAGE_GENERATION_MODEL}
+      - AGENT_API_KEY=${AGENT_API_KEY}
+      - AGENT_BASE_URL=${AGENT_BASE_URL}
+      - AGENT_MODEL=${AGENT_MODEL}
     restart: always
     volumes:
       - ./logs:/app/logs

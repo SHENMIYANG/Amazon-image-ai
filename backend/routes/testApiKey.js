@@ -73,7 +73,7 @@ router.post('/', async (req, res) => {
       return res.status(500).json({ success: false, message: 'API 返回数据格式异常' })
     }
 
-    res.json({ success: true, message: '连接成功！接口完全正常', baseUrl: OPENAI_BASE_URL, model: OPENAI_MODEL })
+    res.json({ success: true, message: '连接成功！接口完全正常', baseUrl: IMAGE_GEN_BASE_URL, model: IMAGE_GENERATION_MODEL })
 
   } catch (error) {
     console.error('API test error:', error.response?.data || error.message)
