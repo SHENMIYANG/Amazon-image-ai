@@ -116,6 +116,15 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                   {img.status === 'completed' ? '✅' : img.status === 'failed' ? '❌' : '⏳'}
                 </span>
               </div>
+
+              {img.actualResolution && (
+                <div className={`image-resolution ${img.sizeMatchesRequest === false ? 'mismatch' : ''}`}>
+                  实际：{img.actualResolution}
+                  {img.requestedResolution && (
+                    <span> / 请求：{img.requestedResolution}</span>
+                  )}
+                </div>
+              )}
               
               {img.prompt && (
                 <div className="image-prompt-display">

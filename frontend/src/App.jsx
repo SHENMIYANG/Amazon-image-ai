@@ -101,7 +101,9 @@ function App() {
         status: 'pending',
         imageUrl: null,
         prompt: plan.prompt,
-        error: null
+        error: null,
+        actualResolution: null,
+        requestedResolution: selectedResolution === '4k' ? '4096x4096' : '2048x2048'
       })),
       listing: { ...listing },
       // style: selectedStyle,  // 已删除：冗余
@@ -206,7 +208,10 @@ function App() {
                           ...img, 
                           status: 'completed', 
                           imageUrl: generatedImage.imageUrl,
-                          error: null
+                          error: null,
+                          actualResolution: generatedImage.actualResolution || null,
+                          requestedResolution: generatedImage.resolution || img.requestedResolution,
+                          sizeMatchesRequest: generatedImage.sizeMatchesRequest
                         } 
                       : img
                   )
@@ -338,7 +343,10 @@ function App() {
                     ...img, 
                     status: 'completed', 
                     imageUrl: generatedImage.imageUrl,
-                    error: null
+                    error: null,
+                    actualResolution: generatedImage.actualResolution || null,
+                    requestedResolution: generatedImage.resolution || img.requestedResolution,
+                    sizeMatchesRequest: generatedImage.sizeMatchesRequest
                   }
                 }
                 return img
@@ -484,7 +492,10 @@ function App() {
                     ...img, 
                     status: 'completed', 
                     imageUrl: generatedImage.imageUrl,
-                    error: null
+                    error: null,
+                    actualResolution: generatedImage.actualResolution || null,
+                    requestedResolution: generatedImage.resolution || img.requestedResolution,
+                    sizeMatchesRequest: generatedImage.sizeMatchesRequest
                   } : img
                 )
               }

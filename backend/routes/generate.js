@@ -70,7 +70,7 @@ router.post('/', async (req, res) => {
     for (const plan of imagePlans) {
       try {
         const prompt = buildAmazonPrompt(listing, plan, imageType, complexity || 'L2', size)
-        const imageUrl = await callGPTImage2({ 
+        const generatedImage = await callGPTImage2({
           prompt, 
           refImagePath: hasReferenceImages ? refImagePath : null, 
           size, 
@@ -79,12 +79,20 @@ router.post('/', async (req, res) => {
           model 
         })
 
+        const requestedWidth = Number(size.split('x')[0])
+        const requestedHeight = Number(size.split('x')[1])
+        const hasDimensions = Number.isFinite(generatedImage.width) && Number.isFinite(generatedImage.height)
+
         generatedImages.push({
           imageId: plan.id,
-          imageUrl,
+          imageUrl: generatedImage.imageUrl,
           prompt,
           status: 'completed',
-          resolution: size
+          resolution: size,
+          actualWidth: generatedImage.width,
+          actualHeight: generatedImage.height,
+          actualResolution: hasDimensions ? `${generatedImage.width}x${generatedImage.height}` : null,
+          sizeMatchesRequest: hasDimensions ? generatedImage.width === requestedWidth && generatedImage.height === requestedHeight : null
         })
       } catch (err) {
         console.error(`生成图${plan.id}失败:`, err.response?.data || err.message)
@@ -159,11 +167,31 @@ async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, mode
 
   // 把 base64 存为本地文件，返回 URL
   const b64 = response.data.data[0].b64_json
+  const imageBuffer = Buffer.from(b64, 'base64')
+  const dimensions = readPngDimensions(imageBuffer)
   const outputFilename = `generated-${Date.now()}.png`
   const outputPath = path.join(process.cwd(), 'uploads', outputFilename)
-  fs.writeFileSync(outputPath, Buffer.from(b64, 'base64'))
+  fs.writeFileSync(outputPath, imageBuffer)
 
-  return `/uploads/${outputFilename}`
+  return {
+    imageUrl: `/uploads/${outputFilename}`,
+    width: dimensions.width,
+    height: dimensions.height
+  }
+}
+
+function readPngDimensions(buffer) {
+  const pngSignature = '89504e470d0a1a0a'
+  const isPng = buffer.length >= 24 && buffer.subarray(0, 8).toString('hex') === pngSignature
+
+  if (!isPng) {
+    return { width: null, height: null }
+  }
+
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20)
+  }
 }
 
 function buildAmazonPrompt(listing, imagePlan, imageType, complexity = 'L2', resolution = '2048x2048') {

@@ -189,6 +189,26 @@
   font-size: 0.9rem;
 }
 
+.image-resolution {
+  padding: 0.35rem 0.7rem;
+  background: #eef7ff;
+  border-bottom: 1px solid #d8eafb;
+  color: #0056b3;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.image-resolution span {
+  color: #5f6f80;
+  font-weight: 600;
+}
+
+.image-resolution.mismatch {
+  background: #fff3cd;
+  border-bottom-color: #ffe69c;
+  color: #9a6700;
+}
+
 .image-content {
   padding: 0.7rem;
   min-height: 200px;
