@@ -154,7 +154,28 @@ export default function AmazonListingForm({ listing, onChange }) {
           填写产品基本信息，AI 会根据这些信息生成专业的图片策略
         </p>
         
-        <div className="form-row">
+        <div className="form-group unified-listing-input">
+          <label>产品 Listing 信息 + 卖点 <span className="required">*</span></label>
+          <textarea
+            value={listing.listingInfo || listing.sellingPoints || ''}
+            onChange={(e) => onChange('listingInfo', e.target.value)}
+            placeholder={`可以直接粘贴完整资料，例如：
+标题：Wireless Bluetooth Headphones with Noise Cancelling
+类目：Electronics > Headphones
+市场：US
+尺寸/重量：20 x 18 x 8 cm, 300g
+材质：ABS Plastic, Matte Finish
+目标人群：Busy professionals, students, travelers
+卖点：
+1. Advanced Noise Cancelling Technology
+2. 40-Hour Battery Life
+3. Comfortable Over-Ear Design`}
+            rows={10}
+          />
+          <span className="help-text">建议第一行写产品标题；Listing 文案、参数和卖点都可以放在这里。</span>
+        </div>
+
+        <div className="form-row legacy-listing-fields">
           <div className="form-group full-width">
             <label>产品名称 <span className="required">*</span></label>
             <input
@@ -168,7 +189,7 @@ export default function AmazonListingForm({ listing, onChange }) {
           </div>
         </div>
 
-        <div className="form-row">
+        <div className="form-row legacy-listing-fields">
           <div className="form-group">
             <label>所属类目 <span className="required">*</span></label>
             <input

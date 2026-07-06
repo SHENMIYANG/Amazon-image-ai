@@ -11,8 +11,25 @@ import SettingsButton from './components/SettingsButton'
 import AgentAnalyzer from './components/AgentAnalyzer'
 import './App.css'
 
+function extractProductName(listingInfo) {
+  const lines = (listingInfo || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  if (lines.length === 0) return ''
+
+  const titleLine = lines.find(line => /^(title|product\s*name|产品名|产品名称|标题)[:：]/i.test(line))
+  if (titleLine) {
+    return titleLine.replace(/^(title|product\s*name|产品名|产品名称|标题)[:：]\s*/i, '').slice(0, 200)
+  }
+
+  return lines[0].replace(/^[-*•\d.、\s]+/, '').slice(0, 200)
+}
+
 function App() {
   const [listing, setListing] = useState({
+    listingInfo: '',
     productName: '',
     category: '',
     dimensions: '',
@@ -46,6 +63,16 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   const handleListingChange = (field, value) => {
+    if (field === 'listingInfo') {
+      setListing(prev => ({
+        ...prev,
+        listingInfo: value,
+        productName: extractProductName(value),
+        sellingPoints: value
+      }))
+      return
+    }
+
     setListing(prev => ({ ...prev, [field]: value }))
   }
 
@@ -581,7 +608,7 @@ function App() {
   }
 
   // 检查是否可以生成
-  const canGenerate = listing.productName && productImages.length > 0
+  const canGenerate = (listing.productName || listing.listingInfo) && productImages.length > 0
 
   return (
     <div className="app">

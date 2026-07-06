@@ -9,7 +9,7 @@ export default function ComplianceCheckPanel({ listing, imageType }) {
   }
 
   // 检查必填字段
-  const requiredFields = ['productName', 'category', 'targetAudience', 'sellingPoints', 'marketplace']
+  const requiredFields = ['productName', 'sellingPoints']
   const missingFields = requiredFields.filter(field => !listing[field])
 
   if (missingFields.length > 0) {
