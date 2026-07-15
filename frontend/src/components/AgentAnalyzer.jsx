@@ -1,119 +1,106 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { buildAnalyzeRequest } from '../utils/requestPayload'
+import { getSelectedImageTaskCount } from '../utils/imageTasks'
 import './AgentAnalyzer.css'
 
-export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
+export default function AgentAnalyzer({ listing, productImages = [], onAnalyzeComplete }) {
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [successMessage, setSuccessMessage] = useState(null)
-  const [recommendation, setRecommendation] = useState(null)
   const timerRef = useRef(null)
+  const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
 
-  // 分析过程中每秒更新计时
   useEffect(() => {
-    if (analyzing) {
-      setElapsedSeconds(0)
-      timerRef.current = setInterval(() => {
-        setElapsedSeconds(prev => prev + 1)
-      }, 1000)
-    } else {
+    if (!analyzing) {
       clearInterval(timerRef.current)
+      return undefined
     }
+
+    setElapsedSeconds(0)
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1)
+    }, 1000)
+
     return () => clearInterval(timerRef.current)
   }, [analyzing])
 
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current)
+    }
+  }, [])
+
   const handleAnalyze = async () => {
-    if (!listing.productName || !listing.sellingPoints) {
-      alert('请先填写产品名称和核心卖点')
+    if (!listing.productName && !listing.listingInfo && !listing.sellingPoints) {
+      alert('请先填写产品 Listing 信息和核心卖点。')
+      return
+    }
+
+    if (!productImages || productImages.length === 0) {
+      alert('请先上传产品图片，AI 需要结合图片和产品信息一起分析。')
+      return
+    }
+
+    if (selectedImageCount === 0) {
+      alert('请先选择至少 1 张要生成的图片任务。')
       return
     }
 
     setAnalyzing(true)
     setError(null)
+    setSuccessMessage(null)
 
     try {
+      const formData = new FormData()
+      productImages.forEach((img) => formData.append('images', img))
+
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      })
+      const uploadData = await uploadResponse.json()
+
+      if (!uploadData.success) {
+        throw new Error(uploadData.message || '产品图片上传失败')
+      }
+
+      const referenceImages = uploadData.images.map((img) => img.url)
+
       const response = await fetch('/api/agent-analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          productName: listing.productName,
-          category: listing.category,
-          marketplace: listing.marketplace,
-          dimensions: listing.dimensions,
-          material: listing.material,
-          targetAudience: listing.targetAudience,
-          additionalInfo: listing.additionalInfo,
-          complexity: listing.complexity || 'L2',
-          sellingPoints: listing.sellingPoints,
-          imageType: listing.imageType,
-          imagePlans: listing.imagePlans
-        })
+        body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages))
       })
 
-      // 先检查响应状态
       if (!response.ok) {
         const errorText = await response.text()
         let errorMessage = '分析失败'
+
         try {
           const errorJson = JSON.parse(errorText)
           errorMessage = errorJson.message || errorMessage
         } catch {
           errorMessage = errorText || errorMessage
         }
+
         throw new Error(errorMessage)
       }
 
       const result = await response.json()
-
-      // 调用父组件的回调，传入分析结果
       onAnalyzeComplete(result.data)
 
-      // 显示成功提示
-      setSuccessMessage(`✅ 策略生成成功！AI 已为 7 张图片生成详细策略`)
-      
-      // 只有当 AI 推荐的策略与用户手动选择的不同时，才显示推荐提示
-      const usedStrategy = result.data._meta?.strategyUsed
-      const recommendedStrategy = result.data._meta?.recommendedStrategy
-      
-      // 用户手动选了策略，但 AI 推荐了另一个
-      if (listing.imageType && recommendedStrategy && recommendedStrategy !== listing.imageType) {
-        const strategyNames = {
-          basic: ' 通用基础型',
-          featureFocus: '🔥 卖点聚焦型',
-          infographic: '📊 信息图表型',
-          lifestyle: '🏡 生活方式型',
-          technical: '⚡ 科技感型',
-          premium: '💎 高端奢华型',
-          fashion: '👗 时尚潮流型'
-        }
-        const userStrategyName = strategyNames[listing.imageType] || listing.imageType
-        const aiRecommendedName = strategyNames[recommendedStrategy] || recommendedStrategy
-        
-        setRecommendation({
-          user: userStrategyName,
-          ai: aiRecommendedName
-        })
-      }
-
-      // 5 秒后自动清除成功提示
-      setTimeout(() => {
-        setSuccessMessage(null)
-        setRecommendation(null)
-      }, 5000)
-
+      setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图回填详细方案。`)
     } catch (err) {
       console.error('Agent 分析失败:', err)
       setError(err.message)
-      setSuccessMessage(null)
-      setRecommendation(null)
-      
-      // 根据错误类型给出不同提示
+
       if (err.message.includes('500') || err.message.includes('Internal Server Error')) {
-        alert(`❌ 服务器内部错误\n\n${err.message}\n\n请查看后端控制台日志获取详细错误信息。`)
+        alert(`服务端内部错误\n\n${err.message}`)
       } else {
-        alert(`❌ 分析失败：${err.message}`)
+        alert(`分析失败：${err.message}`)
       }
     } finally {
       setAnalyzing(false)
@@ -123,9 +110,9 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
   return (
     <div className="agent-analyzer">
       <div className="analyzer-header">
-        <h3>🤖 AI 智能分析</h3>
+        <h3>AI 智能分析</h3>
         <span className="help-text">
-          AI 会自动分析产品卖点，并为 7 张图片生成详细策略
+          AI 会结合产品图片、Listing 信息、补充信息、语言、品牌主色和字体偏好，为当前选中的 {selectedImageCount} 张图生成更完整的策略方案。
         </span>
       </div>
 
@@ -136,52 +123,39 @@ export default function AgentAnalyzer({ listing, onAnalyzeComplete }) {
       >
         {analyzing ? (
           <>
-            <span className="loading-spinner">⏳</span>
-            AI 正在分析产品...（已等待 {elapsedSeconds} 秒）
+            <span className="loading-spinner">...</span>
+            AI 正在结合产品图片和 Listing 分析，已等待 {elapsedSeconds} 秒
           </>
         ) : (
           <>
-            <span className="btn-icon">✨</span>
-            一键生成套图策略
+            <span className="btn-icon">+</span>
+            一键生成出图方案
           </>
         )}
       </button>
 
       {analyzing && elapsedSeconds >= 30 && (
         <div className="waiting-hint">
-          🤖 AI 正在生成 7 张图的详细策略，任务较复杂，请耐心等待，无需重复点击
+          AI 正在读取产品图并规划当前图片任务，请耐心等待，不需要重复点击。
         </div>
       )}
 
-      {successMessage && (
-        <div className="success-message">
-          {successMessage}
-          {recommendation && (
-            <div className="recommendation-hint">
-              💡 你选择了 <strong>{recommendation.user}</strong>，但 AI 更推荐 <strong>{recommendation.ai}</strong>
-            </div>
-          )}
-        </div>
-      )}
+      {successMessage && <div className="success-message">{successMessage}</div>}
 
-      {error && (
-        <div className="error-message">
-          ❌ {error}
-        </div>
-      )}
+      {error && <div className="error-message">{error}</div>}
 
       <div className="analyzer-features">
         <div className="feature-item">
-          <span className="feature-icon">🎯</span>
-          <span>智能推荐最佳策略</span>
+          <span className="feature-icon">1</span>
+          <span>结合产品图和 Listing 信息一起分析</span>
         </div>
         <div className="feature-item">
-          <span className="feature-icon">📊</span>
-          <span>卖点 - 图片智能映射</span>
+          <span className="feature-icon">2</span>
+          <span>把卖点映射到你当前勾选的图片任务</span>
         </div>
         <div className="feature-item">
-          <span className="feature-icon">🌍</span>
-          <span>考虑目标市场偏好</span>
+          <span className="feature-icon">3</span>
+          <span>补全中文策略说明，英文执行稿改为按需查看</span>
         </div>
       </div>
     </div>

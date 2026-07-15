@@ -3,7 +3,7 @@
   border-radius: 12px;
   padding: 1.5rem;
   color: white;
-  margin-bottom: 2rem;
+  margin-bottom: 0;
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
@@ -14,12 +14,16 @@
 .analyzer-header h3 {
   font-size: 1.2rem;
   margin: 0 0 0.5rem 0;
-  font-weight: 600;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .analyzer-header .help-text {
   font-size: 0.9rem;
-  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.7;
+  font-style: normal;
+  opacity: 1;
 }
 
 .analyze-btn {
@@ -91,6 +95,8 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.96);
+  line-height: 1.45;
 }
 
 .feature-icon {
@@ -122,11 +128,32 @@
 }
 
 .recommendation-hint {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #86efac;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
   font-size: 13px;
-  color: #047857;
+  color: #1e40af;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recommendation-hint button {
+  border: 1px solid #93c5fd;
+  background: white;
+  color: #1d4ed8;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.recommendation-hint button:hover {
+  background: #dbeafe;
 }
 
 @keyframes slideIn {

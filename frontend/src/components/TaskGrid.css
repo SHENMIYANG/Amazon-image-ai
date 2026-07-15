@@ -1,7 +1,7 @@
 .task-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(900px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
 }
 
 .task-grid-empty {
@@ -131,7 +131,7 @@
 
 .task-images-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1rem;
   padding: 1.2rem;
 }
@@ -158,6 +158,23 @@
   align-items: center;
 }
 
+.image-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.image-name {
+  min-width: 0;
+  color: #374151;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .image-prompt-display {
   padding: 0.5rem 0.7rem;
   background: #fff;
@@ -173,6 +190,27 @@
 
 .image-prompt-display strong {
   color: #007bff;
+}
+
+.english-prompt-details {
+  padding: 0.5rem 0.7rem;
+  background: #f8fbff;
+  border-bottom: 1px solid #e1e4e8;
+  font-size: 0.75rem;
+  color: #4b5563;
+}
+
+.english-prompt-details summary {
+  color: #0056b3;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 0.35rem;
+}
+
+.english-prompt-details small {
+  display: block;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .image-badge {
@@ -211,7 +249,7 @@
 
 .image-content {
   padding: 0.7rem;
-  min-height: 200px;
+  min-height: 220px;
   display: flex;
   align-items: center;
   justify-content: center;

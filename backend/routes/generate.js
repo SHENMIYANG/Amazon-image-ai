@@ -1,4 +1,4 @@
-import express from 'express'
+﻿import express from 'express'
 import axios from 'axios'
 import fs from 'fs'
 import path from 'path'
@@ -9,10 +9,8 @@ const router = express.Router()
 
 router.post('/', async (req, res) => {
   try {
-    // 注意：前端发送 imageType，不是 style
     const { listing, imagePlans, imageType, resolution, referenceImages, complexity } = req.body
 
-    // 验证输入
     if (!listing || !imagePlans || imagePlans.length === 0) {
       return res.status(400).json({
         error: 'Invalid input',
@@ -20,43 +18,41 @@ router.post('/', async (req, res) => {
       })
     }
 
-    // 产品参考图是可选的，不是必须的
-    // 如果有参考图，用于 image-to-image；没有则纯 text-to-image
     const hasReferenceImages = referenceImages && referenceImages.length > 0
 
-    // 从后端 .env 读取配置（图像生成专用）
     const apiKey = process.env.IMAGE_GEN_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl = process.env.IMAGE_GEN_BASE_URL || process.env.OPENAI_BASE_URL
     const model = process.env.IMAGE_GENERATION_MODEL || process.env.OPENAI_MODEL
 
-    // 严格检查配置是否完整
     if (!apiKey || apiKey === 'sk-your-api-key-here') {
       return res.status(500).json({
         error: 'Missing API Key',
-        message: '后端未配置 IMAGE_GEN_API_KEY，请联系管理员检查 backend/.env'
+        message: '后端未配置 IMAGE_GEN_API_KEY，请检查 backend/.env'
       })
     }
     if (!baseUrl) {
       return res.status(500).json({
         error: 'Missing Base URL',
-        message: '后端未配置 IMAGE_GEN_BASE_URL，请联系管理员检查 backend/.env'
+        message: '后端未配置 IMAGE_GEN_BASE_URL，请检查 backend/.env'
       })
     }
     if (!model) {
       return res.status(500).json({
         error: 'Missing Model',
-        message: '后端未配置 IMAGE_GENERATION_MODEL，请联系管理员检查 backend/.env'
+        message: '后端未配置 IMAGE_GENERATION_MODEL，请检查 backend/.env'
       })
     }
 
-    // 尺寸
     const size = resolution === '4k' ? '4096x4096' : '2048x2048'
 
-    // 参考图路径（如果有）
-    let refImagePath = null
+    let refImagePaths = []
     if (hasReferenceImages) {
-      refImagePath = path.join(process.cwd(), referenceImages[0].replace('/uploads/', 'uploads/'))
-      if (!fs.existsSync(refImagePath)) {
+      refImagePaths = referenceImages
+        .slice(0, 3)
+        .map((imageUrl) => path.join(process.cwd(), imageUrl.replace('/uploads/', 'uploads/')))
+
+      const missingRefPath = refImagePaths.find((imagePath) => !fs.existsSync(imagePath))
+      if (missingRefPath) {
         return res.status(400).json({
           error: 'Reference image not found',
           message: '参考图片不存在，请重新上传'
@@ -64,15 +60,15 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // 逐张生成
     const generatedImages = []
 
     for (const plan of imagePlans) {
       try {
-        const prompt = buildAmazonPrompt(listing, plan, imageType, complexity || 'L2', size)
+        const normalizedPlan = await translatePlanPromptIfNeeded(plan, listing, size)
+        const prompt = buildAmazonPrompt(listing, normalizedPlan, imageType, complexity || 'L2', size)
         const generatedImage = await callGPTImage2({
           prompt, 
-          refImagePath: hasReferenceImages ? refImagePath : null, 
+          refImagePaths: hasReferenceImages ? refImagePaths : [], 
           size, 
           apiKey, 
           baseUrl, 
@@ -85,8 +81,12 @@ router.post('/', async (req, res) => {
 
         generatedImages.push({
           imageId: plan.id,
+          name: plan.name,
+          taskType: plan.taskType || plan.type || null,
           imageUrl: generatedImage.imageUrl,
           prompt,
+          promptEn: prompt,
+          promptZh: normalizedPlan.originalPrompt || plan.prompt || '',
           status: 'completed',
           resolution: size,
           actualWidth: generatedImage.width,
@@ -95,11 +95,14 @@ router.post('/', async (req, res) => {
           sizeMatchesRequest: hasDimensions ? generatedImage.width === requestedWidth && generatedImage.height === requestedHeight : null
         })
       } catch (err) {
-        console.error(`生成图${plan.id}失败:`, err.response?.data || err.message)
+        const errorMessage = formatGenerateError(err)
+        console.error(`生成图 ${plan.id} 失败:`, err.response?.data || errorMessage)
         generatedImages.push({
           imageId: plan.id,
+          name: plan.name,
+          taskType: plan.taskType || plan.type || null,
           status: 'failed',
-          error: err.response?.data?.message || err.message,
+          error: errorMessage,
           prompt: buildAmazonPrompt(listing, plan, imageType, complexity || 'L2', size)
         })
       }
@@ -128,8 +131,7 @@ router.post('/', async (req, res) => {
   }
 })
 
-async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, model }) {
-  // 用 multipart/form-data 发送
+async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl, model }) {
   const form = new FormData()
   form.append('model', model)
   form.append('prompt', prompt)
@@ -137,19 +139,24 @@ async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, mode
   form.append('n', '1')
   form.append('response_format', 'b64_json')
   
-  // 如果有参考图，使用 images/edits 接口（image-to-image）
-  // 如果没有参考图，使用 images/generations 接口（text-to-image）
-  const endpoint = refImagePath ? '/images/edits' : '/images/generations'
+  const hasReferenceImages = Array.isArray(refImagePaths) && refImagePaths.length > 0
+  const endpoint = hasReferenceImages ? '/images/edits' : '/images/generations'
   
-  if (refImagePath) {
-    // 根据实际文件扩展名设置正确的 Content-Type
-    const ext = path.extname(refImagePath).toLowerCase()
-    const contentType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 
-                        ext === '.png' ? 'image/png' : 'image/jpeg'
-    
-    form.append('image', fs.createReadStream(refImagePath), {
-      filename: path.basename(refImagePath),
-      contentType: contentType
+  if (hasReferenceImages) {
+    refImagePaths.forEach((refImagePath, index) => {
+      const ext = path.extname(refImagePath).toLowerCase()
+      const contentType = ext === '.jpg' || ext === '.jpeg'
+        ? 'image/jpeg'
+        : ext === '.png'
+          ? 'image/png'
+          : ext === '.webp'
+            ? 'image/webp'
+            : 'image/jpeg'
+
+      form.append(refImagePaths.length > 1 ? 'image[]' : 'image', fs.createReadStream(refImagePath), {
+        filename: path.basename(refImagePath) || `reference-${index + 1}.png`,
+        contentType
+      })
     })
   }
 
@@ -161,14 +168,13 @@ async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, mode
         ...form.getHeaders(),
         'Authorization': `Bearer ${apiKey}`
       },
-      timeout: 120000 // 2 分钟超时（生成大图需要时间）
+      timeout: getImageGenerationTimeoutMs()
     }
   )
 
-  // 把 base64 存为本地文件，返回 URL
   const b64 = response.data.data[0].b64_json
   const imageBuffer = Buffer.from(b64, 'base64')
-  const dimensions = readPngDimensions(imageBuffer)
+  const dimensions = readImageDimensions(imageBuffer)
   const outputFilename = `generated-${Date.now()}.png`
   const outputPath = path.join(process.cwd(), 'uploads', outputFilename)
   fs.writeFileSync(outputPath, imageBuffer)
@@ -178,6 +184,35 @@ async function callGPTImage2({ prompt, refImagePath, size, apiKey, baseUrl, mode
     width: dimensions.width,
     height: dimensions.height
   }
+}
+
+function getImageGenerationTimeoutMs() {
+  const timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS || 300000)
+  return Number.isFinite(timeoutMs) && timeoutMs >= 60000 ? timeoutMs : 300000
+}
+
+function formatGenerateError(err) {
+  const rawMessage = err.response?.data?.message || err.response?.data?.error?.message || err.message || '图片生成失败'
+  const isTimeout = err.code === 'ECONNABORTED' || String(rawMessage).toLowerCase().includes('timeout')
+
+  if (isTimeout) {
+    return `图片生成接口超过 ${Math.round(getImageGenerationTimeoutMs() / 1000)} 秒仍未返回，请稍后重试，或先降低复杂度、减少同时生成的图片数量。`
+  }
+
+  return rawMessage
+}
+
+function readImageDimensions(buffer) {
+  const pngDimensions = readPngDimensions(buffer)
+  if (pngDimensions.width && pngDimensions.height) return pngDimensions
+
+  const jpegDimensions = readJpegDimensions(buffer)
+  if (jpegDimensions.width && jpegDimensions.height) return jpegDimensions
+
+  const webpDimensions = readWebpDimensions(buffer)
+  if (webpDimensions.width && webpDimensions.height) return webpDimensions
+
+  return { width: null, height: null }
 }
 
 function readPngDimensions(buffer) {
@@ -194,167 +229,318 @@ function readPngDimensions(buffer) {
   }
 }
 
-function buildAmazonPrompt(listing, imagePlan, imageType, complexity = 'L2', resolution = '2048x2048') {
-  const { productName, category, targetAudience, sellingPoints, dimensions, material, marketplace, fontPreference, designNotes, additionalInfo } = listing
+function readJpegDimensions(buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    return { width: null, height: null }
+  }
 
-  // 获取策略库中的视觉风格
-  const strategy = STRATEGY_LIBRARY[imageType]
-  const visualStyle = strategy?.visualStyle || {}
-  
-  // 字体映射
+  let offset = 2
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1
+      continue
+    }
+
+    const marker = buffer[offset + 1]
+    const segmentLength = buffer.readUInt16BE(offset + 2)
+    const isStartOfFrame = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)
+
+    if (isStartOfFrame) {
+      return {
+        width: buffer.readUInt16BE(offset + 7),
+        height: buffer.readUInt16BE(offset + 5)
+      }
+    }
+
+    offset += 2 + segmentLength
+  }
+
+  return { width: null, height: null }
+}
+
+function readWebpDimensions(buffer) {
+  const isWebp = buffer.length >= 30 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+
+  if (!isWebp) {
+    return { width: null, height: null }
+  }
+
+  const chunkType = buffer.subarray(12, 16).toString('ascii')
+
+  if (chunkType === 'VP8X' && buffer.length >= 30) {
+    return {
+      width: 1 + buffer.readUIntLE(24, 3),
+      height: 1 + buffer.readUIntLE(27, 3)
+    }
+  }
+
+  if (chunkType === 'VP8 ' && buffer.length >= 30) {
+    return {
+      width: buffer.readUInt16LE(26) & 0x3fff,
+      height: buffer.readUInt16LE(28) & 0x3fff
+    }
+  }
+
+  if (chunkType === 'VP8L' && buffer.length >= 25) {
+    const bits = buffer.readUInt32LE(21)
+    return {
+      width: (bits & 0x3fff) + 1,
+      height: ((bits >> 14) & 0x3fff) + 1
+    }
+  }
+
+  return { width: null, height: null }
+}
+
+function containsChinese(text = '') {
+  return /[\u3400-\u9fff]/.test(text)
+}
+
+function getMarketplaceLanguage(marketplace = 'UK') {
+  const languageMap = {
+    US: 'English',
+    UK: 'English',
+    CA: 'English',
+    AU: 'English',
+    DE: 'German',
+    FR: 'French',
+    IT: 'Italian',
+    ES: 'Spanish',
+    JP: 'Japanese',
+    NL: 'Dutch',
+    SE: 'Swedish',
+    PL: 'Polish'
+  }
+
+  return languageMap[marketplace] || 'English'
+}
+
+function getTargetImageLanguage(listing = {}) {
+  return listing.imageLanguage || getMarketplaceLanguage(listing.marketplace || 'UK')
+}
+
+function getTypographyStyle(fontPreference = 'auto') {
   const fontMap = {
-    'arial': 'Arial, Helvetica, sans-serif',
-    'times': 'Times New Roman, serif',
-    'roboto': 'Roboto, sans-serif',
-    'open-sans': 'Open Sans, sans-serif',
-    'montserrat': 'Montserrat, sans-serif'
-  }
-  const selectedFont = fontMap[fontPreference] || fontMap['arial']
-
-  // ========== 基础 prompt ==========
-  let prompt = `Professional Amazon product photography for ${productName}`
-  prompt += `. Category: ${category || 'General'}`
-  prompt += `. Image size: ${resolution}`
-
-  if (targetAudience) prompt += `. Target audience: ${targetAudience}`
-
-  // 卖点
-  if (sellingPoints) {
-    const points = sellingPoints.split('\n').filter(s => s.trim())
-    prompt += `. Key selling points: ${points.join(', ')}`
+    auto: 'a typography style that matches the product type, marketplace, and visual strategy',
+    'geometric-sans': 'a clean geometric sans-serif typography style',
+    'bold-sans': 'a bold industrial sans-serif typography style',
+    'elegant-serif': 'an elegant serif typography style',
+    'rounded-playful': 'a rounded friendly typography style',
+    'handwritten-playful': 'a playful handwritten typography style',
+    arial: 'Arial or a similar neutral sans-serif typography style',
+    times: 'Times New Roman or a similar serif typography style',
+    roboto: 'Roboto or a similar modern sans-serif typography style',
+    'open-sans': 'Open Sans or a similar readable sans-serif typography style',
+    montserrat: 'Montserrat or a similar modern branding typography style'
   }
 
-  if (dimensions) prompt += `. Dimensions: ${dimensions}`
-  if (material) prompt += `. Material: ${material}`
+  return fontMap[fontPreference] || fontMap.auto
+}
 
-  // 字体要求
-  prompt += `. Typography: Use ${selectedFont} font for any text overlays`
+export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
+  const prompt = plan?.prompt || ''
+  const promptEn = plan?.promptEn || plan?.englishPrompt || ''
 
-  if (designNotes) prompt += `. Additional design requirements: ${designNotes}`
+  if (promptEn && !plan.promptDirty) {
+    return {
+      ...plan,
+      originalPrompt: prompt,
+      prompt: promptEn
+    }
+  }
 
-  // ========== 根据复杂度调整详细程度 ==========
+  if (!containsChinese(prompt)) {
+    return plan
+  }
+
+  const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY
+  const baseUrl = process.env.AGENT_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
+  const model = process.env.AGENT_MODEL || 'gpt-4o-mini'
+
+  if (!apiKey || apiKey === 'sk-your-api-key-here') {
+    throw new Error('检测到中文策略，但后端没有配置 AGENT_API_KEY，无法自动翻译成英文 prompt')
+  }
+
+  const userMessage = [
+    'Product name: ' + (listing?.productName || 'Unknown product'),
+    'Marketplace: ' + (listing?.marketplace || 'UK'),
+    'Text overlay language: ' + getTargetImageLanguage(listing),
+    'Image size: ' + resolution,
+    'Chinese strategy:',
+    prompt
+  ].join('\n')
+
+  const response = await axios.post(baseUrl + '/chat/completions', {
+    model,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are an expert Amazon image-generation prompt translator. Convert Chinese visual strategy notes into one complete, production-ready English prompt for an image generation model. Keep product facts accurate. Add concrete composition, lighting, background, layout, typography, e-commerce infographic details, and quality details. Make sure any visible text overlays use the target marketplace language. Return only the English prompt, no markdown.'
+      },
+      {
+        role: 'user',
+        content: userMessage
+      }
+    ],
+    temperature: 0.2,
+    max_tokens: 900
+  }, {
+    headers: {
+      Authorization: 'Bearer ' + apiKey,
+      'Content-Type': 'application/json'
+    },
+    timeout: 60000
+  })
+
+  const translatedPrompt = response.data?.choices?.[0]?.message?.content?.trim()
+
+  if (!translatedPrompt) {
+    throw new Error('中文策略自动翻译失败：翻译接口没有返回英文 prompt')
+  }
+
+  return {
+    ...plan,
+    originalPrompt: prompt,
+    prompt: translatedPrompt
+  }
+}
+
+export function buildAmazonPrompt(listing, imagePlan, imageType, complexity = 'L2', resolution = '2048x2048') {
+  const {
+    productName,
+    listingInfo,
+    category,
+    targetAudience,
+    sellingPoints,
+    dimensions,
+    material,
+    marketplace,
+    imageLanguage,
+    fontPreference,
+    brandColorMode,
+    brandColor,
+    designNotes,
+    additionalInfo
+  } = listing
+
+  const planPromptIsEnglish = imagePlan?.prompt && !containsChinese(imagePlan.prompt)
+  const shouldIncludeRawField = (value) => value && (!planPromptIsEnglish || !containsChinese(value))
+  const targetLanguage = imageLanguage || getMarketplaceLanguage(marketplace || 'UK')
+  const strategy = STRATEGY_LIBRARY[imageType]
+  const taskType = imagePlan?.taskType || imagePlan?.type || null
+  const visualStyle = strategy?.visualStyle || {}
+  const selectedTypographyStyle = getTypographyStyle(fontPreference)
   const isL1 = complexity === 'L1'
   const isL3 = complexity === 'L3'
-  
-  // L1 极速版：简化描述
+
+  let prompt = 'Professional Amazon product photography for '
+  prompt += shouldIncludeRawField(productName) ? productName : 'the product'
+  prompt += '. Category: ' + (shouldIncludeRawField(category) ? category : 'General')
+  prompt += '. Image size: ' + resolution
+
+  if (shouldIncludeRawField(targetAudience)) {
+    prompt += '. Target audience: ' + targetAudience
+  }
+
+  if (shouldIncludeRawField(sellingPoints)) {
+    const points = String(sellingPoints)
+      .split('\n')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (points.length > 0) {
+      prompt += '. Key selling points: ' + points.join(', ')
+    }
+  }
+
+  if (
+    shouldIncludeRawField(listingInfo) &&
+    String(listingInfo || '').trim() !== String(sellingPoints || '').trim()
+  ) {
+    prompt += '. Full listing context: ' + listingInfo
+  }
+
+  if (shouldIncludeRawField(dimensions)) {
+    prompt += '. Dimensions: ' + dimensions
+  }
+
+  if (shouldIncludeRawField(material)) {
+    prompt += '. Material: ' + material
+  }
+
+  prompt += '. Typography: Use ' + selectedTypographyStyle + ' for any text overlays'
+  prompt += '. Text overlay language: ' + targetLanguage
+  prompt += '. All visible titles, labels, feature text, badges, and infographic copy must use this language'
+
+  if (shouldIncludeRawField(designNotes)) {
+    prompt += '. Additional design requirements: ' + designNotes
+  }
+
+  if (shouldIncludeRawField(additionalInfo)) {
+    prompt += '. Additional product context: ' + additionalInfo
+  }
+
+  prompt += '. Reference consistency: if reference product images are provided, preserve the exact product identity across all generated images, including shape, silhouette, structure, proportions, color, material, surface details, and accessories. Do not invent new parts or alter the product body'
+
   if (isL1) {
-    prompt += `. SIMPLE clean composition, minimal text, white background, basic product photography`
-  }
-  // L3 精品版：极致详细
-  else if (isL3) {
-    prompt += `. ULTRA-DETAILED professional photography, cinematic lighting, premium quality, magazine editorial style, hyper-realistic, 8K resolution`
-  }
-
-  // ========== 根据策略类型添加视觉风格 ==========
-  if (strategy) {
-    // 色彩方案
-    if (visualStyle.colorScheme) {
-      prompt += `. Color scheme: ${visualStyle.colorScheme}`
-    }
-    // 视觉风格描述
-    if (visualStyle.mood) {
-      prompt += `. Mood: ${visualStyle.mood}`
-    }
-    // 背景风格
-    if (visualStyle.background) {
-      prompt += `. Background: ${visualStyle.background}`
-    }
-  }
-
-  // ========== 根据图片 ID 添加具体构图要求 ==========
-  const plan = imagePlan
-  
-  // 如果 AI 已经生成了详细的 prompt，优先使用
-  if (plan.prompt && plan.prompt.length > 50) {
-    prompt += `. ${plan.prompt}`
+    prompt += '. SIMPLE clean composition, minimal text, white background, basic product photography'
+  } else if (isL3) {
+    prompt += '. ULTRA-DETAILED professional photography, cinematic lighting, premium quality, magazine editorial style, hyper-realistic'
   } else {
-    // 否则使用框架默认 prompt
-    if (plan.id === 1) {
-      // 主图：纯白底
-      prompt += `. PURE WHITE BACKGROUND (RGB 255,255,255), product centered filling 85% of frame, professional studio lighting, NO text, NO logos, NO watermarks`
-      if (isL3) prompt += `, soft shadow beneath product for depth`
-    } 
-    else if (plan.id === 2) {
-      // 核心卖点图
-      if (isL1) {
-        prompt += `. Clean infographic: ONE key selling point with simple icon and short text label, minimal layout`
-      } else if (isL3) {
-        prompt += `. Professional infographic layout: LARGE BOLD TITLE at top. 4-5 selling points in vertical list with colorful icons, numbered badges (①②③④⑤), arrows, and callout text. Product hero image integrated. Modern clean design with strong visual hierarchy, high contrast`
-      } else {
-        prompt += `. Infographic layout: LARGE TITLE "Key Features". 3-4 selling points with icons + text labels. Product on right side. Clean white background with subtle gradient`
-      }
-    } 
-    else if (plan.id === 3) {
-      // 功能/使用步骤
-      if (isL1) {
-        prompt += `. Simple 3-step diagram with numbered icons and brief text`
-      } else if (isL3) {
-        prompt += `. Detailed step-by-step flowchart: 4 numbered panels (1→2→3→4) connected by arrows. Each panel has icon + instruction text + mini product photo. Professional educational infographic style`
-      } else {
-        prompt += `. Step-by-step guide: 3-4 numbered steps with icons and short text. Arrows show flow. Product shown in action`
-      }
-    } 
-    else if (plan.id === 4) {
-      // 尺寸/规格图
-      if (isL1) {
-        prompt += `. Simple dimension lines with measurements in inches/cm`
-      } else if (isL3) {
-        prompt += `. Technical specification diagram: precise measurement lines, size callouts, weight/capacity specs. Include scale reference objects (coin, smartphone, soda can). Engineering drawing style with blue accent colors, grid background`
-      } else {
-        prompt += `. Dimension diagram with measurement lines and size labels. Include comparison objects for scale reference`
-      }
-    } 
-    else if (plan.id === 5) {
-      // 材质/细节图
-      if (isL1) {
-        prompt += `. Close-up shot showing material texture and build quality`
-      } else if (isL3) {
-        prompt += `. Extreme macro photography: ultra-detailed material texture, stitching precision, surface finish, craftsmanship details. Shallow depth of field, soft directional lighting creating micro-shadows. Shows tactile premium quality`
-      } else {
-        prompt += `. Close-up macro shot: material texture, craftsmanship details, connection points. Soft studio lighting highlights quality`
-      }
-    } 
-    else if (plan.id === 6) {
-      // 多场景拓展
-      if (isL1) {
-        prompt += `. Product in 2-3 different usage scenarios, simple collage`
-      } else if (isL3) {
-        prompt += `. Multi-scene lifestyle collage: 4 different environments (living room, bathroom, bedroom, outdoor) in 2x2 grid. Real people interacting naturally. Warm authentic photography, shows versatility across use cases. Thin white borders between scenes`
-      } else {
-        prompt += `. Multi-scene collage: product in different spaces (living room, bathroom, bedroom, outdoor). 4-grid layout. Warm lifestyle photography`
-      }
-    } 
-    else if (plan.id === 7) {
-      // 补充场景/生活方式
-      if (isL1) {
-        prompt += `. Lifestyle scene showing product in use, natural lighting`
-      } else if (isL3) {
-        prompt += `. Premium lifestyle photography: aspirational moment with emotional connection. Golden hour lighting, cinematic composition. Product as hero in beautiful setting. Magazine editorial quality, warm inviting atmosphere`
-      } else {
-        prompt += `. Emotional lifestyle moment: warm usage scene with human interaction. Natural lighting, authentic not staged`
-      }
+    prompt += '. Balanced e-commerce composition with clear hierarchy, product readability, and conversion-focused layout'
+  }
+
+  if (strategy) {
+    if (brandColorMode === 'manual' && brandColor) {
+      prompt += '. Accent color guidance: use ' + brandColor + ' as the primary highlight color for titles, badges, icons, and graphic elements while keeping the product truthful'
+    } else {
+      prompt += '. Color palette: adapt to the actual product colors, material, reference image, and use scenario. Do not force a fixed template color scheme'
+    }
+
+    if (visualStyle.mood) {
+      prompt += '. Mood: ' + visualStyle.mood
+    }
+
+    if (visualStyle.background) {
+      prompt += '. Background: ' + visualStyle.background
     }
   }
 
-  // ========== 质量要求（所有 prompt 都包含） ==========
-  prompt += `. high quality, professional photography, studio lighting`
+  if (imagePlan?.prompt && imagePlan.prompt.length > 20) {
+    prompt += '. ' + imagePlan.prompt
+  } else {
+    const planId = Number(imagePlan?.id || 0)
+
+    if (taskType ? taskType === 'main' : planId === 1) {
+      prompt += '. PURE WHITE BACKGROUND (RGB 255,255,255), product fully visible, centered, no crop, no text, no logos, no watermarks, no unrelated props'
+    } else if (taskType ? taskType === 'feature' : planId === 2) {
+      prompt += '. Hero feature image with the strongest selling point, clear headline area, strong visual focus, product remains dominant'
+    } else if (taskType ? taskType === 'steps' : planId === 3) {
+      prompt += '. Usage steps or feature infographic with clear icon structure, concise text blocks, and easy-to-scan layout'
+    } else if (taskType ? taskType === 'dimensions' : planId === 4) {
+      prompt += '. Dimension or specification image with size lines, scale reference, and structured annotation layout'
+    } else if (taskType ? taskType === 'detail' : planId === 5) {
+      prompt += '. Close-up detail image showing material, craftsmanship, texture, or durability highlights'
+    } else if (taskType ? taskType === 'scenario' : planId === 6) {
+      prompt += '. Multi-scene or multi-use collage showing the product in several realistic usage contexts'
+    } else if (taskType === 'comparison') {
+      prompt += '. Comparison layout showing clear product advantages, before-after improvement, or versus-other-options structure without inventing unsupported claims'
+    } else if (taskType === 'package') {
+      prompt += '. Package contents or kit overview image showing only confirmed included items and accessories, arranged clearly for quick understanding'
+    } else if (taskType ? taskType === 'summary' : planId === 7) {
+      prompt += '. Closing lifestyle or trust-building image showing package value, final atmosphere, or purchase confidence'
+    }
+  }
+
+  prompt += '. High quality, professional photography, studio lighting'
   if (!isL1) {
-    prompt += `, ultra-detailed, sharp focus`
+    prompt += ', ultra-detailed, sharp focus'
   }
 
   return prompt
 }
 
-// ========== 已弃用：风格关键词映射（暂时注释保留，以后可能用） ==========
-// function getStyleKeywords(style) {
-//   const styleMap = {
-//     'minimalist': 'minimalist, clean, simple, modern',
-//     'professional': 'professional, corporate, polished, high-end',
-//     'playful': 'playful, fun, colorful, energetic',
-//     'luxury': 'luxury, premium, elegant, sophisticated',
-//     'eco-friendly': 'eco-friendly, natural, sustainable, green'
-//   }
-//   return styleMap[style] || ''
-// }
-
 export default router
+

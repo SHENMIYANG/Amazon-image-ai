@@ -1,528 +1,216 @@
-/**
- * Amazon Listing 图片营销策略库 V2.0
- * 
- * 核心理念：
- * - 不是按"行业"分类，而是按"营销策略"分类
- * - AI 先判断最适合哪种策略，再生成对应的 7 张图
- * - 支持主策略 + 辅策略组合
- * - 支持 L1/L2/L3 复杂度控制出图成本
- */
-
 const STRATEGY_LIBRARY = {
-  // ============================================================
-  // 🟢 Strategy A｜Basic（通用基础型）
-  // 定位：最通用、适用于绝大多数产品
-  // 视觉风格：白底 + 浅灰背景、简洁干净、高产品占比、蓝色点缀、信息适中
-  // ============================================================
   basic: {
     id: 'basic',
     name: '通用基础型',
-    icon: '🎯',
+    icon: '\u{1F3AF}',
     color: '#4CAF50',
-    description: '最通用的策略，适合大多数产品',
+    description: '最通用的策略，适合大多数普通商品。',
     suitableFor: ['收纳用品', '厨房用品', '五金工具', '汽车用品', '宠物用品', '园艺用品', '小家电'],
     visualStyle: {
-      background: '白底 + 浅灰背景',
-      mood: '简洁干净',
-      productRatio: '高产品占比 (80%+)',
-      accentColor: '蓝色点缀',
-      infoDensity: '信息适中',
-      colorScheme: 'white, light gray, blue accent'
+      background: 'clean e-commerce background adapted to the real product color, material, and usage scene',
+      mood: 'clean, practical, conversion-focused',
+      productRatio: 'high product coverage',
+      infoDensity: 'balanced information density',
+      paletteRule: 'adapt to the real product instead of forcing a fixed template color'
     },
     framework: [
-      {
-        id: 1,
-        type: 'main',
-        name: '白底主图',
-        purpose: '提升 CTR',
-        content: '产品完整展示，符合亚马逊规范',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props', '专业打光']
-      },
-      {
-        id: 2,
-        type: 'hero-feature',
-        name: '核心卖点第一印象',
-        purpose: '最大卖点 + 使用场景',
-        content: '1 个核心卖点与场景融合展示',
-        requirements: ['场景化', '1 个卖点标题', '简洁排版']
-      },
-      {
-        id: 3,
-        type: 'features',
-        name: '功能介绍',
-        purpose: '建立认知',
-        content: '3-5 个核心功能图标/列表',
-        requirements: ['图标化', '简短文字', '清晰布局']
-      },
-      {
-        id: 4,
-        type: 'specs',
-        name: '尺寸参数',
-        purpose: '降低退货率',
-        content: '尺寸、重量、规格标注',
-        requirements: ['三面尺寸', '对比参照物', '清晰数字']
-      },
-      {
-        id: 5,
-        type: 'material',
-        name: '材质细节',
-        purpose: '建立品质感',
-        content: '材质、工艺特写',
-        requirements: ['微距拍摄', '纹理可见', '光影突出']
-      },
-      {
-        id: 6,
-        type: 'scenes',
-        name: '多场景应用',
-        purpose: '激发购买欲',
-        content: '不同使用环境展示',
-        requirements: ['3-4 场景', '真实使用', '温暖光线']
-      },
-      {
-        id: 7,
-        type: 'summary',
-        name: '综合总结',
-        purpose: '提升转化率',
-        content: '配件、包装、生活方式或卖点总结',
-        requirements: ['情感连接', '完整感', '行动召唤']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '提升点击率', content: '完整展示产品全貌，符合亚马逊主图规范', requirements: ['纯白背景', '无文案', '无水印', '无无关道具', '产品完整'] },
+      { id: 2, type: 'hero-feature', name: '核心卖点图', purpose: '快速建立购买理由', content: '用一个核心卖点带动画面理解', requirements: ['场景化', '卖点标题清楚', '产品仍是主体'] },
+      { id: 3, type: 'features', name: '功能说明图', purpose: '帮助理解功能', content: '展示主要功能或使用步骤', requirements: ['图标清楚', '信息简洁', '层级清晰'] },
+      { id: 4, type: 'specs', name: '尺寸参数图', purpose: '减少尺寸误判', content: '展示尺寸、重量、容量、结构或参照物', requirements: ['数字清楚', '比例明确', '可快速阅读'] },
+      { id: 5, type: 'material', name: '材质细节图', purpose: '建立品质感', content: '展示材质纹理、结构做工和耐用细节', requirements: ['细节特写', '真实纹理', '光线自然'] },
+      { id: 6, type: 'scenes', name: '多场景应用图', purpose: '扩大使用想象', content: '展示不同场景或不同用途', requirements: ['真实场景', '用途明确', '不喧宾夺主'] },
+      { id: 7, type: 'summary', name: '补充总结图', purpose: '补齐转化信息', content: '包装内容、礼品属性、补充卖点或生活方式总结', requirements: ['信息补完', '画面收尾', '增强信任感'] }
     ]
   },
-
-  // ============================================================
-  // 🔵 Strategy B｜Feature Focus（卖点强化型）
-  // 定位：功能卖点驱动，突出产品优势
-  // 视觉风格：大标题、大图标、强对比、箭头标注、产品主体突出
-  // ============================================================
   featureFocus: {
     id: 'featureFocus',
     name: '卖点强化型',
-    icon: '🔥',
+    icon: '\u{1F525}',
     color: '#FF5722',
-    description: '功能卖点驱动，突出产品优势',
-    suitableFor: ['工具', '健身器材', '汽车用品', '宠物用品', '户外用品', '厨房工具'],
+    description: '适合功能卖点明确，需要强表达的产品。',
+    suitableFor: ['工具', '健身器材', '汽车用品', '户外用品', '功能型家居', '厨房工具'],
     visualStyle: {
-      background: '浅色渐变背景',
-      mood: '强力冲击',
-      productRatio: '中等产品占比 (60-70%)',
-      accentColor: '橙色/红色强对比',
-      infoDensity: '信息密集',
-      colorScheme: 'orange, red, high contrast'
+      background: 'high-contrast sales-oriented layout adapted to the product',
+      mood: 'direct, strong, persuasive',
+      productRatio: 'medium to high product coverage',
+      infoDensity: 'medium-high information density',
+      paletteRule: 'allow stronger contrast while keeping the product truthful and readable'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图',
-        purpose: '符合亚马逊规范', content: '产品完整展示',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'hero-feature', name: '最大卖点（Hero Feature）',
-        purpose: '第一眼抓住注意力', content: '最大卖点大标题 + 产品主体 + 强调效果',
-        requirements: ['超大标题', '粗体字', '箭头指向']
-      },
-      {
-        id: 3, type: 'features', name: '4-6 个核心卖点图标展示',
-        purpose: '全面了解优势', content: '编号圆圈 + 彩色图标 + 加粗名称 + 简短描述',
-        requirements: ['垂直排列', '左侧图标右侧文字', '彩色区分']
-      },
-      {
-        id: 4, type: 'comparison', name: '使用前后对比 / Our vs Others',
-        purpose: '证明优势', content: 'Before/After 或 对比表格',
-        requirements: ['左右分割', '绿勾红叉', '数据支撑']
-      },
-      {
-        id: 5, type: 'steps', name: '使用步骤或安装流程',
-        purpose: '降低使用门槛', content: 'Step 1-2-3-4 编号流程',
-        requirements: ['编号圆圈', '箭头连接', '每步配图']
-      },
-      {
-        id: 6, type: 'scenes', name: '多场景应用',
-        purpose: '激发想象', content: '不同环境下的使用',
-        requirements: ['真实场景', '人物互动', '多样性']
-      },
-      {
-        id: 7, type: 'trust', name: '品牌优势 / 套装内容 / 售后保障',
-        purpose: '建立信任促成下单', content: '认证标志、配件清单、保修信息',
-        requirements: ['信任徽章', '清单式', '保障承诺']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '完整展示产品', requirements: ['纯白背景', '无文案', '无无关元素'] },
+      { id: 2, type: 'hero-feature', name: 'Hero 卖点图', purpose: '第一眼抓住注意力', content: '围绕最强卖点做大标题表达', requirements: ['大标题', '重点清晰', '产品主体突出'] },
+      { id: 3, type: 'features', name: '卖点拆解图', purpose: '把优势讲透', content: '列出 4 到 6 个核心卖点', requirements: ['层级清晰', '图标辅助', '文字简洁'] },
+      { id: 4, type: 'comparison', name: '前后对比图', purpose: '证明价值差异', content: '使用前后或我方与他方对比', requirements: ['左右分区', '差异明确', '不要虚构数据'] },
+      { id: 5, type: 'steps', name: '步骤说明图', purpose: '降低使用门槛', content: '展示安装、使用或操作流程', requirements: ['流程清楚', '步骤编号', '配图说明'] },
+      { id: 6, type: 'scenes', name: '场景应用图', purpose: '延展用途', content: '展示产品在不同环境中的使用', requirements: ['真实环境', '用途明确', '产品可见'] },
+      { id: 7, type: 'trust', name: '信任补强图', purpose: '增强下单信心', content: '展示套装、售后、保障或补充卖点', requirements: ['补全信息', '提高信任感', '不堆砌假认证'] }
     ]
   },
-
-  // ============================================================
-  // 🟣 Strategy C｜Infographic（信息图型）
-  // 定位：参数丰富、数据导向
-  // 视觉风格：信息密度高、图标化设计、表格、数据可视化、蓝灰科技配色
-  // ============================================================
   infographic: {
     id: 'infographic',
     name: '信息图型',
-    icon: '📊',
+    icon: '\u{1F4CA}',
     color: '#2196F3',
-    description: '参数丰富、数据导向，最像 Linkfox 风格',
+    description: '适合参数较多、说明复杂、需要可视化的产品。',
     suitableFor: ['数码产品', '工具', '小家电', '运动器材', '汽车用品'],
     visualStyle: {
-      background: '白色/浅灰网格',
-      mood: '专业严谨',
-      productRatio: '中等产品占比 (50-60%)',
-      accentColor: '蓝灰科技配色',
-      infoDensity: '信息密度极高',
-      colorScheme: 'blue, gray, tech tones'
+      background: 'professional infographic layout adapted to the product',
+      mood: 'clear, informative, professional',
+      productRatio: 'medium product coverage',
+      infoDensity: 'high information density',
+      paletteRule: 'use structured information blocks without forcing a fixed color template'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图',
-        purpose: '符合亚马逊规范', content: '产品完整展示',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'feature-overview', name: '卖点总览（4-6 个卖点）',
-        purpose: '一目了然所有优势', content: 'LARGE BOLD TITLE + 垂直排列的卖点列表',
-        requirements: ['大标题', '编号圆圈', '彩色图标', '短文案']
-      },
-      {
-        id: 3, type: 'specs-table', name: '参数规格表',
-        purpose: '详细技术参数', content: '尺寸、重量、材质、颜色、配件等规格表格',
-        requirements: ['表格/网格', '图标+标签+数值', '清晰对齐']
-      },
-      {
-        id: 4, type: 'comparison', name: 'Our Product vs Others',
-        purpose: '差异化竞争', content: '左边我们的优势(绿勾) vs 别人的劣势(红叉)',
-        requirements: ['左右对比', '视觉符号', '加粗差异点']
-      },
-      {
-        id: 5, type: 'steps', name: '使用步骤（Step 1-4）',
-        purpose: '教育用户', content: '编号面板 + 图片 + 说明文字 + 流程箭头',
-        requirements: ['水平/垂直流程', '每步独立框', '箭头连接']
-      },
-      {
-        id: 6, type: 'scene-grid', name: '场景拼贴（2×2）',
-        purpose: '展示多功能性', content: '4 个场景等分网格，每个有小标签',
-        requirements: ['2x2 网格', '白色边框', '底部标签']
-      },
-      {
-        id: 7, type: 'trust', name: '认证、保修、售后、品质保证',
-        purpose: '建立信任', content: '认证标志 + 保修期 + 客服信息 + "100% Satisfaction"',
-        requirements: ['图标矩阵', '保障文案', '专业可信']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '完整展示产品', requirements: ['纯白背景', '无文案', '无无关元素'] },
+      { id: 2, type: 'feature-overview', name: '卖点总览图', purpose: '快速扫读全局', content: '集中展示多条核心卖点', requirements: ['标题清晰', '模块分明', '信息不混乱'] },
+      { id: 3, type: 'specs-table', name: '参数表格图', purpose: '说明关键规格', content: '尺寸、材质、容量、重量、配件等', requirements: ['表格式布局', '字段清楚', '便于阅读'] },
+      { id: 4, type: 'comparison', name: '对比图', purpose: '建立差异认知', content: '展示我方和其他方案的差异', requirements: ['结构清楚', '差异点明确', '不虚构认证'] },
+      { id: 5, type: 'steps', name: '步骤图', purpose: '教学说明', content: '分步骤说明安装或使用方法', requirements: ['编号顺序', '说明简洁', '视觉流畅'] },
+      { id: 6, type: 'scene-grid', name: '场景拼图', purpose: '补充多用途信息', content: '用拼图展示多个使用场景', requirements: ['画面统一', '标签清楚', '不抢产品主体'] },
+      { id: 7, type: 'trust', name: '信任保障图', purpose: '补强信任与售后认知', content: '展示保障、服务或品质承诺', requirements: ['可信表达', '避免假背书', '适合转化收尾'] }
     ]
   },
-
-  // ============================================================
-  // 🟠 Strategy D｜Lifestyle（生活方式型）
-  // 定位：场景和情绪价值驱动
-  // 视觉风格：暖色调、自然光、真人出镜、家庭氛围、留白较多
-  // ============================================================
   lifestyle: {
     id: 'lifestyle',
-    name: '生活方式型',
-    icon: '🏡',
+    name: '生活场景型',
+    icon: '\u{1F3E1}',
     color: '#FF9800',
-    description: '场景和情绪价值驱动',
-    suitableFor: ['家居用品', '宠物用品', '美妆', '香薰', '母婴', '户外用品'],
+    description: '适合强调真实使用环境和生活体验的产品。',
+    suitableFor: ['家具', '收纳用品', '厨房用品', '卫浴用品', '灯具', '装饰品', '宠物家居', '园艺用品', '户外装饰'],
     visualStyle: {
-      background: '真实家居/户外环境',
-      mood: '温馨舒适',
-      productRatio: '中等产品占比 (40-50%)',
-      accentColor: '暖色调（橙/黄/米）',
-      infoDensity: '信息较少，重氛围',
-      colorScheme: 'warm tones, orange, yellow, beige'
+      background: 'real home, garden, patio, bathroom, kitchen, porch, or room context based on the product',
+      mood: 'warm, natural, immersive',
+      productRatio: 'medium product coverage',
+      infoDensity: 'low to medium information density',
+      paletteRule: 'keep the palette natural and rooted in the actual scene and product'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图',
-        purpose: '符合亚马逊规范', content: '产品完整展示',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'lifestyle-hero', name: '真人使用场景',
-        purpose: '情感代入', content: '真人自然使用产品的瞬间 + 温暖光线',
-        requirements: ['真人出镜', '自然表情', '生活化场景']
-      },
-      {
-        id: 3, type: 'scene-collage', name: '多生活场景拼贴',
-        purpose: '展示多功能性', content: '家/办公室/户外/旅行 4 格拼贴',
-        requirements: ['4 格拼接', '统一色调', '"Perfect for Every Moment"']
-      },
-      {
-        id: 4, type: 'detail-shot', name: '材质细节特写',
-        purpose: '品质感知', content: '面料/材质微距 + "Premium Quality Craftsmanship"',
-        requirements: ['微距镜头', '柔光', '纹理清晰']
-      },
-      {
-        id: 5, type: 'size-compare', name: '尺寸与日常物品对比',
-        purpose: '空间感知', content: '手/手机/硬币/饮料罐对比 + 尺寸标签',
-        requirements: ['常见参照物', '测量线', '清晰数值']
-      },
-      {
-        id: 6, type: 'unboxing', name: '开箱展示 + 配件',
-        purpose: '价值感知', content: '精美包装 + 全部配件整齐排列',
-        requirements: ['俯拍角度', '整齐排列', '"Complete Package"']
-      },
-      {
-        id: 7, type: 'emotional', name: '情感化生活方式画面',
-        purpose: '最终转化', content: '梦想生活场景 + 产品自然融入',
-        requirements: ['电影级构图', '自然光', '"Elevate Your Lifestyle"']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '完整展示产品', requirements: ['纯白背景', '无文案', '无无关元素'] },
+      { id: 2, type: 'lifestyle-hero', name: '生活场景主图', purpose: '建立代入感', content: '展示产品自然融入真实环境', requirements: ['真实空间', '自然光', '产品可见'] },
+      { id: 3, type: 'before-after', name: '使用效果图', purpose: '展示生活改善结果', content: '展示使用前后或使用效果变化', requirements: ['效果直观', '场景真实', '少量说明即可'] },
+      { id: 4, type: 'detail-shot', name: '真实细节图', purpose: '说明材质和品质', content: '展示真实使用中的材质、结构、防水、防锈等细节', requirements: ['细节清楚', '真实环境', '避免假特效'] },
+      { id: 5, type: 'space-fit', name: '空间比例图', purpose: '帮助判断尺寸适配', content: '展示产品在真实空间中的比例和搭配效果', requirements: ['空间参照', '尺寸可读', '风格自然'] },
+      { id: 6, type: 'scene-collage', name: '多场景拼图', purpose: '说明适配范围', content: '拼图展示不同使用环境', requirements: ['多场景统一', '生活感强', '产品不失真'] },
+      { id: 7, type: 'emotional', name: '生活方式收尾图', purpose: '强化最终向往感', content: '用舒适、整洁、氛围感画面做收尾', requirements: ['自然氛围', '产品仍清楚', '不过度营销'] }
     ]
   },
-
-  // ============================================================
-  // ⚙️ Strategy E｜Technical（科技数码型）
-  // 定位：科技感、性能展示
-  // 视觉风格：深色背景、蓝色科技光效、HUD/UI 元素、金属质感、爆炸图
-  // ============================================================
   technical: {
     id: 'technical',
-    name: '科技数码型',
-    icon: '💻',
+    name: '科技性能型',
+    icon: '\u{1F4BB}',
     color: '#9C27B0',
-    description: '科技感、性能展示',
-    suitableFor: ['电子产品', '手机配件', '耳机', '键盘', '鼠标', '充电器', '智能设备'],
+    description: '适合电子、智能设备和强调性能的产品。',
+    suitableFor: ['电子产品', '手机配件', '耳机', '键鼠', '充电器', '智能设备'],
     visualStyle: {
-      background: '深色/黑色背景 + 蓝色光效',
-      mood: '未来科技',
-      productRatio: '中等产品占比 (60%)',
-      accentColor: '蓝色/紫色霓虹',
-      infoDensity: '技术参数丰富',
-      colorScheme: 'dark blue, purple, neon glow'
+      background: 'technology-oriented visual language adapted to the product',
+      mood: 'modern, precise, performance-driven',
+      productRatio: 'medium product coverage',
+      infoDensity: 'medium to high information density',
+      paletteRule: 'create technical feeling through composition and UI structure rather than a fixed neon palette'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图',
-        purpose: '符合亚马逊规范', content: '产品完整展示',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'tech-features', name: 'Advanced Features',
-        purpose: '技术亮点', content: '"Advanced Features" 大标题 + 4 功能箭头标注',
-        requirements: ['科技蓝配色', '现代图标', 'Roboto 字体', 'HUD 元素']
-      },
-      {
-        id: 3, type: 'tech-specs', name: '技术规格表',
-        purpose: '性能参数', content: '性能/连接/电池/兼容性网格',
-        requirements: ['数据可视化', '蓝灰配色', '精确数值']
-      },
-      {
-        id: 4, type: 'exploded-view', name: '内部结构 / 爆炸图',
-        purpose: '工程品质', content: '剖面图/分解图 + 关键部件标注',
-        requirements: ['工程绘图风', '线条标注', '"Engineering Excellence"']
-      },
-      {
-        id: 5, type: 'ui-demo', name: '使用界面展示',
-        purpose: '功能演示', content: '产品 UI/屏幕界面 + 功能说明叠加',
-        requirements: ['界面截图', '功能标注', '蓝色光晕']
-      },
-      {
-        id: 6, type: 'accessories', name: '配件展示',
-        purpose: '完整套装', content: '所有线缆/配件整齐排列 + 清单',
-        requirements: ['平铺拍摄', '白底', '"Complete Kit"']
-      },
-      {
-        id: 7, type: 'tech-scene', name: '科技办公 / 游戏场景',
-        purpose: '使用场景', content: '现代工作空间/游戏环境中使用',
-        requirements: ['RGB 光效', '多屏桌面', '"Perfect for Work & Play"']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '完整展示产品', requirements: ['纯白背景', '无文案', '无无关元素'] },
+      { id: 2, type: 'tech-features', name: '技术亮点图', purpose: '展示核心性能优势', content: '拆解关键性能或技术能力', requirements: ['结构清晰', '术语准确', '不要乱写参数'] },
+      { id: 3, type: 'tech-specs', name: '规格参数图', purpose: '补全性能说明', content: '展示性能、兼容性、续航、连接等信息', requirements: ['字段清晰', '可视化强', '适合快速阅读'] },
+      { id: 4, type: 'exploded-view', name: '结构图', purpose: '强化专业感', content: '展示内部结构、模块或关键部件', requirements: ['逻辑准确', '不虚构部件', '工程感强'] },
+      { id: 5, type: 'ui-demo', name: '界面演示图', purpose: '让功能更直观', content: '展示实际使用界面或功能演示', requirements: ['界面清楚', '功能说明明确', '不过度装饰'] },
+      { id: 6, type: 'accessories', name: '配件图', purpose: '补充套装价值', content: '展示全部配件和包装内容', requirements: ['平铺整齐', '清单清楚', '适合电商展示'] },
+      { id: 7, type: 'tech-scene', name: '使用场景图', purpose: '说明真实使用环境', content: '展示办公、居家或设备环境中的使用方式', requirements: ['环境真实', '产品功能明确', '不喧宾夺主'] }
     ]
   },
-
-  // ============================================================
-  // 🟤 Strategy F｜Premium（高端品牌型）
-  // 定位：高客单价产品、品牌质感
-  // 视觉风格：极简、高级光影、大留白、少文字、品牌广告大片风格
-  // ============================================================
   premium: {
     id: 'premium',
-    name: '高端品牌型',
-    icon: '✨',
+    name: '高端质感型',
+    icon: '\u2728',
     color: '#212121',
-    description: '高客单价产品、品牌质感',
-    suitableFor: ['家具', '床垫', '咖啡机', '高端厨具', '美容仪', '智能家居', '高端宠物用品'],
+    description: '适合高客单价产品，强调高级感和品牌质感。',
+    suitableFor: ['家具', '床垫', '高端厨具', '美容仪', '智能家居', '高端宠物用品'],
     visualStyle: {
-      background: '纯色/渐变高级背景',
-      mood: '奢华宁静',
-      productRatio: '低产品占比 (30-40%，重氛围)',
-      accentColor: '黑金/深蓝/香槟金',
-      infoDensity: '极少文字，重意境',
-      colorScheme: 'black, gold, champagne, deep blue'
+      background: 'premium editorial environment adapted to the product category and material',
+      mood: 'refined, calm, high-end',
+      productRatio: 'lower product coverage with more atmosphere and space',
+      infoDensity: 'low text density',
+      paletteRule: 'premium feeling should come from lighting, composition, and material expression, not a forced luxury palette'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图',
-        purpose: '符合亚马逊规范', content: '产品完整展示（极简风格）',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'brand-hero', name: '品牌级 Hero Image',
-        purpose: '品牌印象', content: '大片级单张，产品 + 高级光影 + 极简构图',
-        requirements: ['电影级布光', '大留白', '极简美学']
-      },
-      {
-        id: 3, type: 'craftsmanship', name: '材质与工艺',
-        purpose: '价值感知', content: '材质拼接/表面处理/手工细节',
-        requirements: ['微距特写', '光影层次', '触感传达']
-      },
-      {
-        id: 4, type: 'lifestyle-premium', name: '生活方式大片',
-        purpose: '向往感', content: '高端生活环境中的产品融入',
-        requirements: ['杂志大片风', '自然光', '情绪氛围']
-      },
-      {
-        id: 5, type: 'macro-detail', name: '产品细节微距',
-        purpose: '精致感', content: '关键细节的极致特写',
-        requirements: ['极端微距', '景深虚化', '质感呈现']
-      },
-      {
-        id: 6, type: 'space-context', name: '尺寸与空间搭配',
-        purpose: '空间感知', content: '在真实房间中的比例参考',
-        requirements: ['广角透视', '家具参照', '空间感']
-      },
-      {
-        id: 7, type: 'aspirational', name: '高端生活场景收尾',
-        purpose: '终极向往', content: '梦想生活方式 + 产品作为主角',
-        requirements: ['黄金时刻光线', '电影构图', '情感共鸣']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '极简方式展示产品全貌', requirements: ['纯白背景', '无文案', '无无关元素'] },
+      { id: 2, type: 'brand-hero', name: '品牌级 Hero 图', purpose: '建立高级印象', content: '用更有广告感的方式拍出产品气质', requirements: ['留白', '高级光影', '构图克制'] },
+      { id: 3, type: 'craftsmanship', name: '材质工艺图', purpose: '体现价值感', content: '强调材质、表面处理和做工精度', requirements: ['微距细节', '光影讲究', '触感明确'] },
+      { id: 4, type: 'lifestyle-premium', name: '高级生活方式图', purpose: '建立向往感', content: '让产品出现在更高品质的生活环境中', requirements: ['空间高级', '自然真实', '不过度浮夸'] },
+      { id: 5, type: 'macro-detail', name: '微距细节图', purpose: '放大精致度', content: '聚焦关键细节、纹理和结构', requirements: ['细节锐利', '质感强', '景深控制好'] },
+      { id: 6, type: 'space-context', name: '空间搭配图', purpose: '展示真实搭配效果', content: '展示产品在真实空间中的比例和搭配', requirements: ['空间参照', '气质统一', '产品仍是核心'] },
+      { id: 7, type: 'aspirational', name: '高端收尾图', purpose: '强化最后的向往感', content: '用更情绪化、更有品牌感的画面收尾', requirements: ['氛围准确', '不堆文案', '广告感强'] }
     ]
   },
-
-  // ============================================================
-  // 👗 Strategy G｜Fashion（时尚服饰型）
-  // 定位：穿搭、美感、版型展示
-  // 视觉风格：杂志大片、自然光、高级灰、模特展示、时尚排版
-  // ============================================================
   fashion: {
     id: 'fashion',
-    name: '时尚服饰型',
-    icon: '👗',
+    name: '时尚展示型',
+    icon: '\u{1F457}',
     color: '#E91E63',
-    description: '穿搭、美感、版型展示',
-    suitableFor: ['服装', '鞋子', '帽子', '包包', '配饰', '珠宝'],
+    description: '适合服饰、鞋包、配件等强调穿搭与版型的产品。',
+    suitableFor: ['服装', '鞋子', '包袋', '配饰', '珠宝'],
     visualStyle: {
-      background: '纯色/简约室内/街拍场景',
-      mood: '时尚潮流',
-      productRatio: '中高产品占比 (70%)',
-      accentColor: '高级灰/莫兰迪色',
-      infoDensity: '适中，重美感',
-      colorScheme: 'gray, morandi tones, neutral'
+      background: 'fashion editorial setting adapted to the product and target audience',
+      mood: 'stylish, clean, aspirational',
+      productRatio: 'medium to high product coverage',
+      infoDensity: 'medium information density',
+      paletteRule: 'keep styling aligned with the actual product color and outfit logic'
     },
     framework: [
-      {
-        id: 1, type: 'main', name: '白底主图 / 平铺图',
-        purpose: '符合亚马逊规范', content: '产品完整展示（平铺或挂拍）',
-        requirements: ['PURE WHITE BACKGROUND', '无文字', '无水印', '无 props']
-      },
-      {
-        id: 2, type: 'model-wear', name: '模特穿搭图',
-        purpose: '上身效果', content: '模特穿着展示整体造型',
-        requirements: ['全身/半身', '自然姿态', '时尚背景']
-      },
-      {
-        id: 3, type: 'fabric-detail', name: '面料特写',
-        purpose: '材质感知', content: '面料纹理/编织/印花细节',
-        requirements: ['微距拍摄', '纹理清晰', '"Premium Fabric Detail"']
-      },
-      {
-        id: 4, type: 'size-guide', name: '尺码指南',
-        purpose: '降低退货', content: '尺码表 + 身高体重推荐 + 试穿对比',
-        requirements: ['清晰表格', '身材参考', '合身度说明']
-      },
-      {
-        id: 5, type: 'craftsmanship', name: '工艺细节',
-        purpose: '品质感知', content: '缝线/拉链/纽扣/印花等工艺特写',
-        requirements: ['细节放大', '工艺标注', '"Craftsmanship Details"']
-      },
-      {
-        id: 6, type: 'multi-angle', name: '多角度展示',
-        purpose: '全面了解', content: '前/侧/背/细节多角度 OR 动态效果',
-        requirements: ['多视角', '一致性光线', '完整轮廓']
-      },
-      {
-        id: 7, type: 'lookbook', name: 'Lookbook 风格收尾',
-        purpose: '搭配灵感', content: '完整穿搭 Lookbook + 配饰建议',
-        requirements: ['杂志排版', '搭配建议', '"Styling Tips"']
-      }
+      { id: 1, type: 'main', name: '白底主图', purpose: '符合主图规范', content: '完整展示产品或平铺主图', requirements: ['纯白背景', '无文案', '产品完整'] },
+      { id: 2, type: 'model-wear', name: '穿搭展示图', purpose: '展示上身或搭配效果', content: '让买家快速理解版型和风格', requirements: ['模特自然', '穿搭合理', '产品重点清楚'] },
+      { id: 3, type: 'fabric-detail', name: '面料细节图', purpose: '说明材质质感', content: '展示面料、纹理、缝线和做工', requirements: ['细节清楚', '光线柔和', '不失真'] },
+      { id: 4, type: 'style-guide', name: '搭配建议图', purpose: '给出穿搭想象', content: '展示搭配方向、场景或配件灵感', requirements: ['审美统一', '不过度杂乱', '产品仍突出'] },
+      { id: 5, type: 'size-guide', name: '尺码指南图', purpose: '减少尺码误判', content: '展示尺码、版型或试穿参考', requirements: ['表格清楚', '信息准确', '易于阅读'] },
+      { id: 6, type: 'craftsmanship', name: '工艺细节图', purpose: '说明品质做工', content: '展示拉链、纽扣、接缝、配件等细节', requirements: ['局部放大', '做工清楚', '真实可信'] },
+      { id: 7, type: 'lookbook', name: 'Lookbook 收尾图', purpose: '强化整体时尚感', content: '用更完整的穿搭或生活方式画面收尾', requirements: ['风格统一', '有搭配感', '适合提升吸引力'] }
     ]
   }
 }
-
-// ============================================================
-// 复杂度级别定义（控制出图成本）
-// ============================================================
 
 const COMPLEXITY_LEVELS = {
   L1: {
     id: 'L1',
     name: '极速版',
-    icon: '⚡',
-    description: '简单白底 + 基础信息，适合低价铺货',
+    icon: '\u26A1',
+    description: '以白底图和基础信息图为主，适合低价铺货快速出图。',
     cost: '低',
     imageCount: 7,
-    features: [
-      '首图：标准白底主图',
-      '副图 2-3：基础卖点 + 尺寸',
-      '副图 4-7：简化版（白底 + 简短文字）',
-      '无场景图',
-      '无信息图',
-      '生成速度快'
-    ]
+    features: ['白底主图', '基础卖点图', '简化尺寸说明', '无重场景特效']
   },
   L2: {
     id: 'L2',
     name: '标准版',
-    icon: '📋',
-    description: '场景 + 卖点 + 尺寸，适合大多数 SKU',
+    icon: '\u{1F4CB}',
+    description: '兼顾卖点、场景、尺寸和细节，适合大多数 SKU。',
     cost: '中',
     imageCount: 7,
-    features: [
-      '首图：标准白底主图',
-      '副图 2-3：卖点展示 + 功能介绍',
-      '副图 4：尺寸参数',
-      '副图 5-6：场景图',
-      '副图 7：综合总结',
-      '平衡质量和成本'
-    ]
+    features: ['白底主图', '卖点图', '尺寸图', '场景图', '综合总结图']
   },
   L3: {
     id: 'L3',
     name: '精品版',
-    icon: '🏆',
-    description: '加入信息图、对比图、情绪化场景，适合重点推广产品',
+    icon: '\u{1F3C6}',
+    description: '加入更完整的信息图、对比图和氛围感场景，适合重点款。',
     cost: '高',
     imageCount: 7,
-    features: [
-      '首图：高质量白底主图',
-      '副图 2-3：详细卖点 + 参数表格',
-      '副图 4：对比图/爆炸图',
-      '副图 5-6：高品质场景图',
-      '副图 7：情感化/品牌级收尾',
-      '最高质量输出'
-    ]
+    features: ['高质量主图', '完整卖点信息', '对比或结构图', '高质量场景图', '收尾强化图']
   }
 }
 
-// ============================================================
-// AI 策略选择规则
-// ============================================================
-
 const STRATEGY_SELECTION_RULES = [
-  // 单策略匹配
-  { condition: '通用商品', strategy: 'basic' },
-  { condition: '功能型商品', strategy: 'featureFocus' },
-  { condition: '参数较多', strategy: 'infographic' },
-  { condition: '家居/宠物/母婴', strategy: 'lifestyle' },
-  { condition: '数码电子', strategy: 'technical' },
-  { condition: '高客单价', strategy: 'premium' },
-  { condition: '服饰鞋包', strategy: 'fashion' },
-  
-  // 组合策略示例
+  { condition: '普通铺货商品', strategy: 'basic' },
+  { condition: '功能卖点强的商品', strategy: 'featureFocus' },
+  { condition: '参数较多的商品', strategy: 'infographic' },
+  { condition: '家居与生活方式商品', strategy: 'lifestyle' },
+  { condition: '数码电子商品', strategy: 'technical' },
+  { condition: '高客单价商品', strategy: 'premium' },
+  { condition: '服饰鞋包商品', strategy: 'fashion' },
   { condition: '智能空气炸锅', strategy: 'technical + lifestyle' },
-  { condition: '记忆棉床垫', strategy: 'premium + lifestyle' },
-  { condition: '电动螺丝刀', strategy: 'technical + featureFocus' },
-  { condition: '宠物饮水机', strategy: 'lifestyle + infographic' },
+  { condition: '高端床垫', strategy: 'premium + lifestyle' },
+  { condition: '电动工具', strategy: 'technical + featureFocus' },
   { condition: '收纳箱', strategy: 'basic + lifestyle' }
 ]
 
-export {
-  STRATEGY_LIBRARY,
-  COMPLEXITY_LEVELS,
-  STRATEGY_SELECTION_RULES
-}
+export { STRATEGY_LIBRARY, COMPLEXITY_LEVELS, STRATEGY_SELECTION_RULES }

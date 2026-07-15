@@ -1,0 +1,220 @@
+# Amazon Image Studio Project Rules
+
+## Project Overview
+
+This project is an Amazon Listing image generation tool for ecommerce SKU publishing.
+
+Core workflow:
+
+1. Upload product reference images.
+2. Paste product Listing information, selling points, marketplace, and optional notes.
+3. Choose which image tasks to generate and how many of each are needed.
+4. Run AI analysis to produce Chinese-readable image strategies for the selected tasks.
+5. Keep Chinese strategy text as the operator-facing source of truth.
+6. Generate English execution prompts only on demand for preview, or automatically at final image-generation time.
+7. Generate images through the backend image generation proxy.
+8. Display, retry, continue, preview, and download generated images.
+
+This is not a single-image generator. It is an Amazon Listing image production workflow driven by configurable image tasks.
+
+## Tech Stack
+
+- Frontend: React 18 + Vite, plain JavaScript JSX, component-scoped CSS files.
+- Backend: Node.js 20+, Express, ES modules.
+- Upload handling: multer on backend, browser-side image compression on frontend.
+- AI analysis: backend route analyzes product images + Listing information + selected image tasks.
+- Image generation: backend route proxies image generation API and saves results under backend/uploads.
+- Dev setup: frontend runs on port 5173, backend runs on port 3001. Vite proxies /api and /uploads to backend.
+- Production setup: backend can serve frontend/dist when NODE_ENV=production.
+
+Important folders:
+
+- frontend/src/App.jsx: main frontend workflow and task state.
+- frontend/src/components: UI components.
+- frontend/src/utils/requestPayload.js: request payload shaping. Keep requests compact.
+- frontend/src/utils/imageTasks.js: image-task catalog and task-to-plan expansion.
+- backend/server.js: Express app entry.
+- backend/routes: API routes for upload, analyze, prompt preview, generate, and API-key testing.
+- backend/strategy-library.js: backend hidden strategy source used by AI analysis and generation flavoring.
+- backend/uploads: runtime generated/uploaded files.
+
+## Coding Style
+
+- Use ES modules: import/export syntax only.
+- Keep React components as function components unless an Error Boundary class is required.
+- Use clear camelCase for variables and functions.
+- Use PascalCase for React components.
+- Use kebab-case or existing naming style for CSS class names.
+- Keep one component's styles in the matching .css file when possible.
+- Keep comments short and useful. Do not add comments that merely restate the code.
+- Prefer structured objects and arrays for tasks, request payloads, and image plans.
+- Avoid ad hoc string parsing when there is already a helper in frontend/src/utils.
+
+## Runtime Shape Requirements
+
+The project currently uses JavaScript, not TypeScript. Be strict with runtime shapes.
+
+Listing state should remain compatible with:
+
+- listingInfo
+- productName
+- sellingPoints
+- additionalInfo
+- marketplace
+- imageLanguage
+- fontPreference
+- brandColorMode
+- brandColor
+- designNotes
+- complexity
+- selectedImageTasks
+- imagePlans
+
+Each image plan should remain compatible with:
+
+- id: number in the current selected-task order
+- name: display name for the image task
+- type: image-task type or backend-derived type
+- taskType: main / feature / scenario / detail / dimensions / steps / comparison / package / summary
+- taskKey: stable task instance key such as feature-1
+- purpose: short purpose text
+- prompt: Chinese-readable operator strategy text
+- promptEn: English strategy prompt preview
+- executionPromptEn: final English execution prompt preview
+- promptDirty: true only when the Chinese prompt was manually edited and English preview needs regeneration
+
+Generated image results should preserve:
+
+- imageId
+- name
+- taskType
+- imageUrl
+- status
+- prompt
+- promptEn
+- actualResolution
+- requestedResolution
+- sizeMatchesRequest
+
+Do not send empty legacy fields in requests. Use frontend/src/utils/requestPayload.js helpers.
+
+## Image Task Rules
+
+Current configurable task families:
+
+- main
+- feature
+- scenario
+- detail
+- dimensions
+- steps
+- comparison
+- package
+- summary
+
+The UI must allow users to decide which task types to generate and how many of each they need.
+
+- Do not force a fixed 7-image output.
+- Do not reintroduce required template-family selection as the main workflow.
+- The backend may still use hidden strategy flavoring, but the user-facing source of truth is the selected image task list plus Chinese strategy text.
+
+## Strategy Rules
+
+The project still contains hidden backend strategy families used as internal visual guidance:
+
+- basic
+- featureFocus
+- infographic
+- lifestyle
+- technical
+- premium
+- fashion
+
+Rules:
+
+- Do not re-add home as a visual strategy. Home is a product category, not a visual style.
+- Do not hard-code fixed colors into prompts.
+- Color should adapt to product image, material, usage scenario, and marketplace unless the user manually chooses a brand color.
+- Text language on images must follow the selected image language or marketplace default.
+- Keep strategy flavoring behind the scenes. Do not let it override explicit user task choices.
+
+## Frontend Rules
+
+- App.jsx owns high-level workflow state. Avoid moving cross-step orchestration into small UI components.
+- ProductImageUploader should only compress uploads. It must not crop, pad, add white background, or visually alter product content.
+- Upload compression should preserve product full view and aspect ratio.
+- AmazonListingForm should treat Chinese strategy text as the primary editable content.
+- English execution prompts must not auto-generate for every plan. They should be generated only on explicit preview request or at final generation time.
+- AgentAnalyzer success state should stay understandable and not hide critical planning feedback too quickly.
+- Keep ErrorBoundary wrapping App in main.jsx.
+- Avoid exposing large internal JSON/debug data in the UI or console.
+- Avoid nested cards and crowded UI for operational screens. This app is a work tool, not a marketing landing page.
+- Do not allow image-task changes to silently desync imagePlans; keep plan regeneration deterministic.
+
+## Backend Rules
+
+- server.js should remain a thin Express entry and route mount file.
+- API routes should return clear JSON with success/status/message where possible.
+- Upload route should validate file type and keep uploaded URLs compatible with /uploads.
+- Generate route must keep image generation behind backend. Never call image generation APIs directly from the frontend.
+- Prompt-preview route exists for manual English execution-prompt preview; keep it lightweight and on-demand.
+- Generate route should support reference image content types correctly: jpeg, png, webp.
+- Image dimension detection should support common returned formats where possible.
+- Timeout values should be configurable through environment variables.
+- Do not log secrets or API keys.
+- Do not return massive internal strategy-analysis objects to the frontend unless explicitly needed.
+
+## Request Payload Rules
+
+- Always use frontend/src/utils/requestPayload.js when shaping analyze/generate payloads.
+- Keep payloads compact.
+- Do not send empty strings, empty arrays, legacy fields, or duplicate fields unless required.
+- AI analysis requests should include:
+  - product/listing content
+  - marketplace
+  - additionalInfo when present
+  - complexity
+  - selectedImageTasks
+  - referenceImages
+- Generate requests should include:
+  - compact listing
+  - exactly one imagePlan per generation call
+  - imageType when backend hidden strategy flavoring is needed
+  - complexity
+  - resolution
+  - referenceImages
+
+## Image Generation Rules
+
+- User requests 2K/4K should be sent to backend as requested resolution.
+- The app can request and verify dimensions, but true native 2K detail depends on the upstream image model.
+- Frontend download resizing is only a fallback/export convenience; it is not native model detail.
+- If generated dimensions do not match requested dimensions, preserve that information in UI.
+- Do not silently claim a model generated true 2K if the actual returned file is smaller.
+
+## Reference Image Rules
+
+- Reference images are a product-consistency input, not just a decoration.
+- The generation flow must preserve product identity across output images: shape, silhouette, structure, proportions, color, material, surface details, and accessories.
+- Do not add white padding, crop away the product, or alter the product body during upload preprocessing.
+- If reference-image count is intentionally limited in backend calls, keep that limitation explicit in code and UI expectations.
+
+## Operational Pitfalls to Avoid
+
+- Do not start local services or run git operations unless the user explicitly asks or confirms.
+- Do not overwrite user changes.
+- Do not reset or clean the git working tree without explicit permission.
+- Do not edit backend/.env values casually.
+- Do not remove runtime uploads without explicit user approval.
+- Do not reintroduce hidden form sections or CSS-only-hidden legacy fields.
+- Do not duplicate task or payload logic across frontend and backend without a plan to keep them synchronized.
+
+## Verification Guidelines
+
+For code changes, prefer:
+
+- backend syntax checks with node --check for changed backend files.
+- frontend production build with Vite when JSX/CSS changes are made.
+- targeted search with rg to confirm removed legacy workflow fields are not still referenced.
+
+Do not start dev servers automatically. Ask first if runtime browser testing is needed.

@@ -1,386 +1,368 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import GenerationPreferences from './GenerationPreferences'
+import {
+  IMAGE_TASK_OPTIONS,
+  buildDefaultPlansFromTasks,
+  getDefaultImageTaskConfig,
+  getSelectedImageTaskCount,
+  normalizeImageTaskConfig
+} from '../utils/imageTasks'
 import './AmazonListingForm.css'
-import TemplateSelector from './TemplateSelector'
-import { useState, useEffect } from 'react'
 
-export default function AmazonListingForm({ listing, onChange }) {
-  const [aiRecommendedStrategy, setAiRecommendedStrategy] = useState(null)
-  
-  // 监听 AI 推荐策略变化
+function plansSignature(plans = []) {
+  return JSON.stringify(
+    plans.map((plan) => ({
+      id: plan.id,
+      taskKey: plan.taskKey,
+      taskType: plan.taskType,
+      name: plan.name,
+      prompt: plan.prompt,
+      promptEn: plan.promptEn,
+      executionPromptEn: plan.executionPromptEn,
+      promptDirty: plan.promptDirty
+    }))
+  )
+}
+
+export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
+  const [promptPreviewState, setPromptPreviewState] = useState({})
+  const previewRequestIdsRef = useRef({})
+  const showProductSection = mode === 'full' || mode === 'product'
+  const showStrategySection = mode === 'full' || mode === 'strategy'
+
+  const normalizedTaskConfig = useMemo(
+    () => normalizeImageTaskConfig(listing.selectedImageTasks || getDefaultImageTaskConfig()),
+    [listing.selectedImageTasks]
+  )
+
+  const imagePlans = listing.imagePlans || []
+  const selectedTaskCount = getSelectedImageTaskCount(normalizedTaskConfig)
+
   useEffect(() => {
-    if (listing._meta?.recommendedStrategy && listing._meta.recommendedStrategy !== listing.imageType) {
-      setAiRecommendedStrategy(listing._meta.recommendedStrategy)
-    } else {
-      setAiRecommendedStrategy(null)
+    if (!showStrategySection) return
+
+    const nextPlans = buildDefaultPlansFromTasks(normalizedTaskConfig, imagePlans)
+    if (plansSignature(imagePlans) !== plansSignature(nextPlans)) {
+      onChange('imagePlans', nextPlans)
     }
-  }, [listing._meta?.recommendedStrategy, listing.imageType])
-  
-  // 套图模板预设 - 专业亚马逊排版风格（参考标准 7 图框架）
-  const imageTemplates = {
-    // 基础套图 - 专业亚马逊 7 图框架（只有图 2 展示卖点，其他图各司其职）
-    basic: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: PURE WHITE BACKGROUND (RGB 255,255,255), product centered filling 85% of frame, professional studio lighting, NO text, NO logos, NO watermarks, NO props. Clean product photography, accurate color reproduction' },
-      { id: 2, name: '核心卖点与场景融合', prompt: 'Product in most representative premium usage scene. ONE refined headline at top highlighting core value. Minimal text overlay, clean modern layout, lifestyle photography style. Only 1 key selling point shown' },
-      { id: 3, name: '功能/使用步骤一览', prompt: '3-4 simple icons with brief text labels showing main functions or usage steps. Clean layout, easy to understand, professional infographic style. Focus on functionality, not selling points' },
-      { id: 4, name: '尺寸/容积/重量与结构', prompt: 'Product dimension diagram with three-side measurements (inch/cm). Include capacity/weight specs. Use common objects for scale (coin, phone, soda can). Technical drawing style, clear annotations' },
-      { id: 5, name: '材质与质量细节', prompt: 'Extreme close-up of material texture and craftsmanship details: connection points, handle structure, waterproof testing. Soft lighting highlights quality. Macro photography, shows premium finish' },
-      { id: 6, name: '多场景/多用途拓展', prompt: 'Product in different spaces (living room, bathroom, bedroom, outdoor) OR multiple use cases. 4-grid collage or single composite. Warm lifestyle photography, shows versatility' },
-      { id: 7, name: '补充场景/生活方式/套装', prompt: 'Emotional lifestyle moment: warm usage instant with human interaction, OR complete product set display. Natural lighting, authentic not staged, shows aspirational lifestyle' }
-    ],
-    // 信息图套图 - 强调卖点和参数（最接近 Linkfox 风格）
-    infographic: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: pure white background RGB 255,255,255, product centered filling 85% of frame, professional studio lighting, no text no logos no watermarks' },
-      { id: 2, name: '卖点总览图', prompt: 'FULL infographic layout: LARGE BOLD TITLE at top. 4-5 KEY SELLING POINTS in vertical list on left. Each has: numbered circle badge (1,2,3,4,5) + colorful icon + bold feature name + short description text. Product hero image on right. Clean modern design, high contrast, e-commerce professional style' },
-      { id: 3, name: '参数详解图', prompt: 'Technical specifications infographic: organized table or grid layout with icons. Categories: Size, Weight, Material, Color, Package Contents. Each spec has icon + label + value in clear text. Light background, professional technical illustration style' },
-      { id: 4, name: '对比优势图', prompt: 'Comparison infographic: "Our Product vs Others" layout. Left side (our product): green checkmarks with advantages. Right side (others): red X marks with disadvantages. Clear visual comparison, bold text labels, persuasive design' },
-      { id: 5, name: '使用步骤图', prompt: 'Step-by-step guide: 3-4 numbered panels (1,2,3,4) showing how to use product. Each panel has image + short instruction text below. Clear visual flow with arrows between steps. Educational infographic style, easy to follow' },
-      { id: 6, name: '场景拼贴图', prompt: '4-scene collage in 2x2 grid: product in different use scenarios. Each scene has small text label at bottom. Thin white borders between scenes. Shows versatility and multiple use cases, lifestyle photography style' },
-      { id: 7, name: '品质保证图', prompt: 'Trust badges infographic: warranty info, quality certifications, customer service icons. Organized layout with icons + text. Add "100% Satisfaction Guaranteed" banner. Professional trust-building design, clean and credible' }
-    ],
-    // 卖点强化型 - 功能卖点驱动
-    featureFocus: [
-      { id: 1, name: '白底主图', prompt: 'Amazon main image: PURE WHITE BACKGROUND (RGB 255,255,255), product centered filling 85% of frame, professional studio lighting, NO text, NO logos, NO watermarks' },
-      { id: 2, name: '最大卖点 Hero Feature', prompt: 'LARGE BOLD HEADLINE at top highlighting #1 selling point. Product hero shot with dramatic angle. Orange/red accent color. Arrow callouts pointing to key features. Strong visual impact, high contrast design' },
-      { id: 3, name: '4-6 核心卖点图标展示', prompt: 'Vertical list of 4-6 selling points on left side. Each has: numbered circle badge (①②③④) + colorful rounded icon + bold feature name in English + short description. Product image on right. Clean layout with strong visual hierarchy' },
-      { id: 4, name: '使用前后对比 / Our vs Others', prompt: 'Split comparison layout. Left side (BEFORE/OTHERS): gray tone with red X marks. Right side (AFTER/OURS): vibrant with green checkmarks. Clear before/after or competitive advantage visualization' },
-      { id: 5, name: '使用步骤或安装流程', prompt: 'Step-by-step flow: numbered circles (1→2→3→4) connected by arrows. Each step has icon + short instruction text + mini product photo showing that step. Clean horizontal or vertical flow layout' },
-      { id: 6, name: '多场景应用', prompt: 'Product in 3-4 different real usage environments. Real people interacting naturally. Shows versatility across different use cases. Warm authentic photography style' },
-      { id: 7, name: '品牌优势 / 套装 / 售后保障', prompt: 'Trust-building layout: warranty badge, quality certification icons, customer service info, "100% Satisfaction Guaranteed" banner. Complete package contents display. Professional credible design' }
-    ],
-    // 生活方式套图 - 情感连接
-    lifestyle: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: pure white background RGB 255,255,255, product centered, no text' },
-      { id: 2, name: '场景拼贴图', prompt: '4-scene lifestyle collage: product in different real-world settings (home, office, outdoor, travel). Grid layout, warm natural lighting. Add title "Perfect for Every Moment" at top. Emotional appeal, aspirational lifestyle' },
-      { id: 3, name: '人物使用图', prompt: 'Person using product naturally, focus on authentic interaction. Add text overlay "Easy to Use" with simple icon. Lifestyle portrait style, warm lighting, emotional connection' },
-      { id: 4, name: '细节特写图', prompt: 'Macro detail shot of product texture and materials. Add callout text "Premium Quality Craftsmanship". Soft diffused lighting, high detail, professional product photography' },
-      { id: 5, name: '尺寸对比图', prompt: 'Size comparison with everyday objects (hand, smartphone, coin). Add text labels showing measurements. Infographic style, clear scale reference, easy to understand' },
-      { id: 6, name: '开箱展示图', prompt: 'Unboxing scene: premium packaging and all contents organized. Add title "Complete Package" at top. Shows value and quality, clean composition, gift-ready presentation' },
-      { id: 7, name: '生活方式图', prompt: 'Aspirational lifestyle scene: product integrated into dream environment. Add text "Elevate Your Lifestyle" with decorative element. High-end photography style, warm inviting atmosphere, emotional appeal' }
-    ],
-    // 科技数码套图 - 科技感（key: technical）
-    technical: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: pure white background, product centered, no text' },
-      { id: 2, name: '功能亮点图', prompt: 'Tech infographic: LARGE TITLE "Advanced Features". 4 feature callouts with arrows pointing to product. Each has: modern tech icon + bold feature name + short spec text. Blue accent color scheme, Roboto font, clean white background, futuristic design' },
-      { id: 3, name: '技术规格图', prompt: 'Technical specifications grid: organized table with icons. Categories: Performance, Connectivity, Battery, Compatibility. Each spec has icon + label + value. Modern tech aesthetic, blue accent colors, professional data visualization' },
-      { id: 4, name: '内部结构图', prompt: 'Exploded view or cutaway illustration showing internal components. Labels for key parts with lines. Add text "Engineering Excellence". Technical illustration style, engineering precision, shows quality construction' },
-      { id: 5, name: '使用演示图', prompt: 'Product with UI/screen interface visible showing features in use. Add text overlays explaining key functions. Modern tech environment, blue tone lighting, shows functionality clearly' },
-      { id: 6, name: '配件展示图', prompt: 'All accessories and cables organized neatly. Add title "Complete Kit" with itemized list. Premium flat lay presentation, white background, shows value' },
-      { id: 7, name: '场景应用图', prompt: 'Person using product in modern workspace/tech environment. Add text "Perfect for Work & Play". Clean contemporary setting, professional lifestyle photography, shows real-world use' }
-    ],
-    // 时尚服饰套图
-    fashion: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: pure white background, product centered, no text' },
-      { id: 2, name: '款式展示图', prompt: 'Fashion infographic: LARGE TITLE "Style & Comfort". Model wearing product with 3-4 style callouts. Each has: icon + text label pointing to features (fit, material, design element). Clean fashion editorial style, modern layout' },
-      { id: 3, name: '材质特写图', prompt: 'Extreme close-up of fabric texture and stitching. Add text callouts: "Premium Fabric", "Quality Stitching". Macro photography, shows material quality and craftsmanship details' },
-      { id: 4, name: '搭配建议图', prompt: 'Flat lay styling: product with complementary items/outfits. Add title "Style It Your Way" at top. Fashion editorial composition, shows coordination suggestions, aspirational aesthetic' },
-      { id: 5, name: '尺码指南图', prompt: 'Size chart with body measurements and fit guide. Organized table with clear text. Add "Find Your Perfect Fit" header. Easy to read layout, helpful sizing information, professional infographic' },
-      { id: 6, name: '细节工艺图', prompt: 'Close-up of construction details: seams, zippers, buttons, etc. Add text labels highlighting quality features. Shows craftsmanship, attention to detail, premium quality' },
-      { id: 7, name: '生活方式图', prompt: 'Urban lifestyle fashion scene: model in natural social setting. Add text "Live in Style" with decorative element. Warm natural lighting, authentic not staged, aspirational lifestyle' }
-    ],
-    // 家居用品套图
-    home: [
-      { id: 1, name: '主图', prompt: 'Amazon main image: pure white background, product centered, no text' },
-      { id: 2, name: '场景展示图', prompt: 'Product in modern home interior (living room/bedroom). Add title "Perfect for Your Home" at top. Natural window lighting, cozy inviting atmosphere, product clearly visible, warm home aesthetic' },
-      { id: 3, name: '使用演示图', prompt: '3-panel step-by-step sequence showing how to use product. Each panel numbered (1,2,3) with short instruction text. Clear visual flow, educational infographic style, easy to follow' },
-      { id: 4, name: '材质工艺图', prompt: 'Material and build quality close-up. Add text callouts: "Quality Materials", "Durable Construction". Soft lighting highlights texture and craftsmanship, shows value' },
-      { id: 5, name: '尺寸参考图', prompt: 'Product in room context with familiar furniture for scale. Add dimension lines with measurements text. Helps visualize actual size in home, practical infographic style' },
-      { id: 6, name: '包装内容图', prompt: 'Packaging and assembly guide flat lay. Add title "Easy Setup" with what\'s included list. Simple diagrams, clear instructions, shows convenience' },
-      { id: 7, name: '互动场景图', prompt: 'Family/person interacting with product in warm home environment. Add text "Designed for Real Life". Natural lighting, authentic usage scene, emotional connection' }
-    ],
-    // 高端品牌型 - 品牌质感
-    premium: [
-      { id: 1, name: '白底主图', prompt: 'Amazon main image: PURE WHITE BACKGROUND, product centered, MINIMALIST composition, ultra-clean, luxury feel. Professional studio lighting with soft shadows. No text, no props. High-end product photography' },
-      { id: 2, name: '品牌级 Hero Image', prompt: 'Cinematic hero shot: product with dramatic premium lighting (golden hour or studio). Large negative space. Minimalist composition. Magazine-quality photography. Subtle gradient background. NO text overlays, let the product speak' },
-      { id: 3, name: '材质与工艺', prompt: 'Extreme macro detail of material quality: grain texture, stitching precision, surface finish, hand-crafted elements. Shallow depth of field. Soft directional lighting creating subtle shadows. Shows tactile quality and craftsmanship' },
-      { id: 4, name: '生活方式大片', prompt: 'Aspirational lifestyle scene: product in premium environment (modern loft, luxury kitchen, designer space). Natural window light. Wide angle showing context. Editorial magazine quality. Emotional atmosphere' },
-      { id: 5, name: '产品细节微距', prompt: 'Ultra-close-up detail shot of key feature: button texture, logo embossing, hinge mechanism, surface pattern. Extreme shallow DOF. Studio lighting highlighting micro-details. Premium quality perception' },
-      { id: 6, name: '尺寸与空间搭配', prompt: 'Product in real room context with furniture for scale reference. Wide-angle architectural perspective. Shows how product fits in living space. Clean modern interior background. Natural ambient lighting' },
-      { id: 7, name: '高端生活场景收尾', prompt: 'Dream lifestyle moment: golden hour lighting, product as hero in beautiful setting. Cinematic composition. Warm emotional tone. Aspirational yet achievable feeling. High-end editorial photography style' }
-    ]
-  }
-  
-  // 处理图片策略变更
+  }, [showStrategySection, normalizedTaskConfig, imagePlans, onChange])
+
   const handleImagePlanChange = (imageId, prompt) => {
-    const newPlans = [...(listing.imagePlans || [])]
-    const existingIndex = newPlans.findIndex(p => p.id === imageId)
-    
-    if (existingIndex >= 0) {
-      newPlans[existingIndex] = { ...newPlans[existingIndex], prompt }
-    } else {
-      newPlans.push({ id: imageId, prompt })
+    previewRequestIdsRef.current[imageId] = `dirty-${Date.now()}`
+
+    onChange(
+      'imagePlans',
+      imagePlans.map((plan) =>
+        plan.id === imageId
+          ? {
+              ...plan,
+              prompt,
+              promptEn: '',
+              executionPromptEn: '',
+              promptDirty: true
+            }
+          : plan
+      )
+    )
+
+    setPromptPreviewState((prev) => ({
+      ...prev,
+      [imageId]: null
+    }))
+  }
+
+  const handleTaskCountChange = (taskType, nextCount) => {
+    onChange('selectedImageTasks', {
+      ...normalizedTaskConfig,
+      [taskType]: Math.max(0, Math.min(6, nextCount))
+    })
+  }
+
+  const handlePreviewPrompt = async (plan) => {
+    if (!plan?.prompt || plan.prompt.trim() === '') {
+      setPromptPreviewState((prev) => ({
+        ...prev,
+        [plan.id]: {
+          status: 'error',
+          message: '请先填写这张图的中文策略，再生成英文执行稿。'
+        }
+      }))
+      return
     }
-    
-    onChange('imagePlans', newPlans)
-  }
-  
-  // 应用套图模板
-  const applyTemplate = (templateKey) => {
-    if (imageTemplates[templateKey]) {
-      onChange('imagePlans', imageTemplates[templateKey])
-      onChange('imageType', templateKey)
-      // 用户手动选择策略后，清除 AI 推荐（因为用户已经做了选择）
-      setAiRecommendedStrategy(null)
+
+    const requestId = Date.now() + plan.id
+    previewRequestIdsRef.current[plan.id] = requestId
+
+    setPromptPreviewState((prev) => ({
+      ...prev,
+      [plan.id]: {
+        status: 'syncing',
+        message: '正在生成英文执行稿...'
+      }
+    }))
+
+    try {
+      const response = await fetch('/api/prompt-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listing,
+          plan: {
+            id: plan.id,
+            name: plan.name,
+            type: plan.type,
+            taskType: plan.taskType,
+            taskKey: plan.taskKey,
+            prompt: plan.prompt,
+            promptEn: plan.promptEn,
+            promptDirty: plan.promptDirty
+          },
+          resolution: '2048x2048'
+        })
+      })
+
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || '英文执行稿生成失败')
+      }
+
+      if (previewRequestIdsRef.current[plan.id] !== requestId) return
+
+      onChange('imagePlans', (currentPlans = []) =>
+        currentPlans.map((item) =>
+          item.id === plan.id
+            ? {
+                ...item,
+                promptEn: result.data.promptEn || '',
+                executionPromptEn: result.data.executionPromptEn || '',
+                promptDirty: false
+              }
+            : item
+        )
+      )
+
+      setPromptPreviewState((prev) => ({
+        ...prev,
+        [plan.id]: {
+          status: 'success',
+          message: '英文执行稿已生成，可展开查看。'
+        }
+      }))
+    } catch (error) {
+      if (previewRequestIdsRef.current[plan.id] !== requestId) return
+
+      setPromptPreviewState((prev) => ({
+        ...prev,
+        [plan.id]: {
+          status: 'error',
+          message: error.message || '英文执行稿生成失败'
+        }
+      }))
     }
   }
-  
-  // 获取图片类型标签（标准亚马逊 7 图结构 - 匹配参考图）
-  const getImagePlanLabel = (num) => {
-    const labels = {
-      1: '主图 - 纯白背景',
-      2: '核心卖点与场景融合',
-      3: '功能/使用步骤一览',
-      4: '尺寸/容积/重量与结构',
-      5: '材质与质量细节',
-      6: '多场景/多用途拓展',
-      7: '补充场景/生活方式/套装'
-    }
-    return labels[num] || `图片${num}`
-  }
-  
-  // 获取图 1 默认值
-  const getImagePlan1Default = () => {
-    const plan1 = (listing.imagePlans || []).find(p => p.id === 1)
-    return plan1?.prompt || 'Pure white background (RGB 255,255,255), product centered filling 85% of frame, no text no logos no watermarks'
-  }
-  
+
   return (
-    <div className="amazon-listing-form">
-      {/* 第一步：产品信息 */}
-      <div className="form-section">
-        <div className="section-header">
-          <h3>📦 第一步：产品信息</h3>
-          <span className="section-number">1/3</span>
-        </div>
-        <p className="section-description">
-          填写产品基本信息，AI 会根据这些信息生成专业的图片策略
-        </p>
-        
-        <div className="form-group unified-listing-input">
-          <label>产品 Listing 信息 + 卖点 <span className="required">*</span></label>
-          <textarea
-            value={listing.listingInfo || listing.sellingPoints || ''}
-            onChange={(e) => onChange('listingInfo', e.target.value)}
-            placeholder={`可以直接粘贴完整资料，例如：
-标题：Wireless Bluetooth Headphones with Noise Cancelling
-类目：Electronics > Headphones
-市场：US
-尺寸/重量：20 x 18 x 8 cm, 300g
-材质：ABS Plastic, Matte Finish
-目标人群：Busy professionals, students, travelers
-卖点：
-1. Advanced Noise Cancelling Technology
+    <div className={`amazon-listing-form amazon-listing-form--${mode}`}>
+      {showProductSection && (
+        <>
+          <div className="form-section">
+            <div className="section-header">
+              <h3>产品信息</h3>
+              <span className="section-number">基础输入</span>
+            </div>
+            <p className="section-description">
+              把产品 Listing 信息、核心卖点、使用场景、使用方式、尺寸材质等尽量集中放在这里。
+              AI 分析和后续生图都会以这里的内容为主。
+            </p>
+
+            <div className="form-group unified-listing-input">
+              <label>
+                产品 Listing 信息 + 核心卖点 <span className="required">*</span>
+              </label>
+              <textarea
+                value={listing.listingInfo || listing.sellingPoints || ''}
+                onChange={(event) => onChange('listingInfo', event.target.value)}
+                placeholder={`可以直接粘贴完整资料，例如：
+【产品名称】：Wireless Bluetooth Headphones with Noise Cancelling
+【产品类目】：Electronics > Headphones
+【尺寸规格】：20 x 18 x 8 cm, 300g
+【目标受众】：Busy professionals, students, travelers
+【卖点描述】：1. Advanced Noise Cancelling Technology
 2. 40-Hour Battery Life
 3. Comfortable Over-Ear Design`}
-            rows={10}
-          />
-          <span className="help-text">建议第一行写产品标题；Listing 文案、参数和卖点都可以放在这里。</span>
-        </div>
-
-        <div className="form-row legacy-listing-fields">
-          <div className="form-group full-width">
-            <label>产品名称 <span className="required">*</span></label>
-            <input
-              type="text"
-              value={listing.productName}
-              onChange={(e) => onChange('productName', e.target.value)}
-              placeholder="例如：Wireless Bluetooth Headphones with Noise Cancelling"
-              maxLength={200}
-            />
-            <span className="char-count">{(listing.productName || '').length}/200</span>
-          </div>
-        </div>
-
-        <div className="form-row legacy-listing-fields">
-          <div className="form-group">
-            <label>所属类目 <span className="required">*</span></label>
-            <input
-              type="text"
-              value={listing.category}
-              onChange={(e) => onChange('category', e.target.value)}
-              placeholder="例如：Electronics &gt; Headphones"
-            />
-            <span className="help-text">英文，如 Electronics &gt; Headphones</span>
-          </div>
-
-          <div className="form-group">
-            <label>目标市场 <span className="required">*</span></label>
-            <select
-              value={listing.marketplace}
-              onChange={(e) => onChange('marketplace', e.target.value)}
-            >
-              <option value="">请选择</option>
-              <option value="US">美国 (Amazon.com)</option>
-              <option value="UK">英国 (Amazon.co.uk)</option>
-              <option value="DE">德国 (Amazon.de)</option>
-              <option value="FR">法国 (Amazon.fr)</option>
-              <option value="IT">意大利 (Amazon.it)</option>
-              <option value="ES">西班牙 (Amazon.es)</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label>尺寸规格 <span className="required">*</span></label>
-            <input
-              type="text"
-              value={listing.dimensions}
-              onChange={(e) => onChange('dimensions', e.target.value)}
-              placeholder="例如：10 x 5 x 3 cm, 300g"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>材质/工艺 <span className="required">*</span></label>
-            <input
-              type="text"
-              value={listing.material}
-              onChange={(e) => onChange('material', e.target.value)}
-              placeholder="例如：ABS Plastic, Matte Finish"
-            />
-          </div>
-        </div>
-
-      </div>
-
-      {/* 第二步：卖点与竞品分析 */}
-      <div className="form-section">
-        <div className="section-header">
-          <h3>🎯 第二步：卖点</h3>
-          <span className="section-number">2/3</span>
-        </div>
-        <p className="section-description">
-          填写核心卖点，AI 会分析卖点优先级并映射到对应的图片
-        </p>
-        
-        <div className="form-group">
-          <label>目标受众（可选）</label>
-          <textarea
-            value={listing.targetAudience}
-            onChange={(e) => onChange('targetAudience', e.target.value)}
-            placeholder="描述你的目标客户群体，例如：&#10;• Parents with young children&#10;• Busy professionals&#10;• Fitness enthusiasts"
-            rows={2}
-          />
-          <span className="help-text">帮助 AI 理解你的客户，生成更精准的图片策略</span>
-        </div>
-
-        {/* <div className="form-group">
-          <label>竞品 ASIN（暂未开放）</label>
-          <input
-            type="text"
-            value={listing.competitorAsin}
-            onChange={(e) => onChange('competitorAsin', e.target.value)}
-            placeholder="功能开发中，敬请期待..."
-            disabled
-          />
-          <span className="help-text"> 竞品分析功能需要接入亚马逊 API，目前正在开发中。当前版本可忽略此字段。</span>
-        </div> */}
-        
-        <div className="form-group">
-          <label>核心卖点 <span className="required">*</span></label>
-          <textarea
-            value={listing.sellingPoints}
-            onChange={(e) => onChange('sellingPoints', e.target.value)}
-            placeholder="每行一个卖点，按重要性排序，最多 5 个：&#10;Advanced Noise Cancelling Technology&#10;40-Hour Battery Life&#10;Comfortable Over-Ear Design"
-            rows={5}
-          />
-          <span className="char-count">
-            {(listing.sellingPoints || '').split('\n').filter(s => s.trim()).length}/5 个卖点
-          </span>
-          <span className="help-text">AI 会为每个卖点分配优先级（高/中/低），并映射到最合适的图片</span>
-        </div>
-        <div className="form-group">
-        <label>补充信息（可选）</label>
-        <textarea
-          value={listing.additionalInfo}
-          onChange={(e) => onChange('additionalInfo', e.target.value)}
-          placeholder="补充说明，例如：&#10;• 使用方式/步骤：第一步...第二步...&#10;• 场景图要求：希望展示在厨房、浴室等场景&#10;• 其他特殊要求..."
-          rows={3}
-        />
-        <span className="help-text">补充使用步骤、场景要求、特殊说明等，帮助 AI 生成更精准的图片</span>
-      </div>
-      </div>
-      
-      {/* 第三步：套图策略 */}
-      <div className="form-section">
-        <div className="section-header">
-          <h3>🖼️ 第三步：套图策略</h3>
-          <span className="section-number">3/3</span>
-        </div>
-        <p className="section-description">
-          选择营销策略 → 选择复杂度 → 点击"AI 分析"生成策略 → 可手动调整 → 生成图片
-        </p>
-        
-        {/* 套图类型选择器 */}
-        <TemplateSelector 
-          selectedType={listing.imageType || 'basic'}
-          onSelect={(type) => applyTemplate(type)}
-          hasGeneratedPlans={listing.imagePlans && listing.imagePlans.length > 0}
-          selectedComplexity={listing.complexity || 'L2'}
-          onComplexityChange={(level) => onChange('complexity', level)}
-          aiRecommendedStrategy={aiRecommendedStrategy}
-          onDismissRecommendation={() => setAiRecommendedStrategy(null)}
-        />
-        
-        <p className="section-help">
-          <strong>💡 使用流程：</strong><br/>
-          1. 选择营销策略（如"通用基础型"或"信息图型"）<br/>
-          2. 选择复杂度级别（L1 极速版 / L2 标准版 / L3 精品版）<br/>
-          3. 点击右上角"✨ 一键生成套图策略"按钮，AI 会根据你的产品信息生成 7 张图片的详细策略<br/>
-          4. 如需调整，可手动修改下方每张图片的 prompt<br/>
-          5. 切换策略时，如已有 AI 生成的策略，会提示是否覆盖
-        </p>
-        
-        {/* 7 张图片策略详情 */}
-        <div className="image-plans-container">
-          <div className="image-plans-header">
-            <h4> 7 张图片详细策略</h4>
-            <span className="help-text">
-              AI 生成的策略包含：构图、场景、色彩、文案、图标等详细参数
-            </span>
-          </div>
-          
-          {/* 图 1 - 主图 */}
-          <div className="form-group image-plan-group">
-            <div className="image-plan-label">
-              <span className="image-badge">图 1</span>
-              <span className="image-type">主图（Amazon 标准）</span>
+                rows={10}
+              />
+              <span className="help-text">
+                建议至少包含：产品名称、卖点、使用场景、使用方式、尺寸规格、材质、目标受众、竞品线索等。信息越完整，分析和生图越稳。
+              </span>
             </div>
-            <textarea
-              value={getImagePlan1Default()}
-              onChange={(e) => handleImagePlanChange(1, e.target.value)}
-              rows={2}
-            />
-            <span className="help-text">✅ 纯白背景，产品居中，无文字无 LOGO，符合亚马逊主图要求</span>
-          </div>
-          
-          {/* 图 2-7 */}
-          {[2, 3, 4, 5, 6, 7].map(num => {
-            const plan = listing.imagePlans?.find(p => p.id === num)
-            const templatePlan = imageTemplates[listing.imageType]?.find(p => p.id === num)
-            const label = getImagePlanLabel(num)
-            return (
-              <div key={num} className="form-group image-plan-group">
-                <div className="image-plan-label">
-                  <span className="image-badge">图{num}</span>
-                  <span className="image-type">{label}</span>
-                </div>
-                <textarea
-                  value={plan?.prompt || ''}
-                  onChange={(e) => handleImagePlanChange(num, e.target.value)}
-                  placeholder={templatePlan?.prompt || `描述图${num}的策略`}
-                  rows={3}
-                />
-                {templatePlan && !plan?.prompt && (
-                  <span className="help-text">✅ 已从"{listing.imageType}"模板填充专业排版描述</span>
-                )}
-                {plan?.prompt && (
-                  <span className="help-text success">✅ 已自定义策略</span>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
 
-      {/* 已删除：产品参考图上传字段是冗余的，真正使用的是顶部的 ProductImageUploader 组件 */}
+            <div className="form-group">
+              <label>补充信息（可选）</label>
+              <textarea
+                value={listing.additionalInfo || ''}
+                onChange={(event) => onChange('additionalInfo', event.target.value)}
+                placeholder={`补充说明，例如：
+【使用方式/步骤】：首次使用前先充电 4-6 小时
+【场景图要求】：希望展示花园、露台、夜间氛围
+【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`}
+                rows={4}
+              />
+              <span className="help-text">
+                这里适合填写禁用内容、额外场景要求、包装说明、礼品属性，或者你不想丢给 AI 自己猜的细节。
+              </span>
+            </div>
+          </div>
+
+          <GenerationPreferences listing={listing} onChange={onChange} />
+        </>
+      )}
+
+      {showStrategySection && (
+        <div className="form-section">
+          <div className="section-header">
+            <h3>出图任务规划</h3>
+            <span className="section-number">{selectedTaskCount} 张图</span>
+          </div>
+          <p className="section-description">
+            不再固定套用 7 套策略类型。这里直接决定要生成什么图、各出几张，再让 AI 结合产品图、补充信息和自定义设置去生成对应方案。
+          </p>
+
+          <div className="image-task-configurator">
+            <div className="image-task-configurator__header">
+              <h4>图片类型与张数</h4>
+              <span className="help-text">
+                例如可以只保留 4 张卖点图，不出主图和尺寸图，减少浪费。
+              </span>
+            </div>
+
+            <div className="image-task-list">
+              {IMAGE_TASK_OPTIONS.map((option) => {
+                const count = normalizedTaskConfig[option.type] || 0
+
+                return (
+                  <div key={option.type} className="image-task-row">
+                    <div className="image-task-copy">
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </div>
+
+                    <div className="image-task-stepper">
+                      <button
+                        type="button"
+                        onClick={() => handleTaskCountChange(option.type, count - 1)}
+                        disabled={count <= 0}
+                      >
+                        -
+                      </button>
+                      <span>{count}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleTaskCountChange(option.type, count + 1)}
+                        disabled={count >= 6}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <p className="section-help">
+            AI 会把上传的参考图当作产品一致性的依据：尽量保持产品的外形、颜色、材质、结构和细节统一，不乱改产品本体。
+          </p>
+
+          {analyzer && <div className="strategy-analyzer-slot">{analyzer}</div>}
+
+          <div className="image-plans-container">
+            <div className="image-plans-header">
+              <h4>已规划 {imagePlans.length} 张图</h4>
+              <span className="help-text">
+                这里默认只看中文策略。英文执行稿不会自动请求，只有你手动点某一张时才会生成。
+              </span>
+            </div>
+
+            {imagePlans.length === 0 ? (
+              <div className="image-plans-empty">请先选择至少 1 张要生成的图片任务。</div>
+            ) : (
+              <div className="image-plans-grid image-plans-grid--full">
+                {imagePlans.map((plan) => (
+                  <div
+                    key={plan.id}
+                    className={`form-group image-plan-group ${
+                      plan.taskType === 'main' ? 'image-plan-group--hero' : ''
+                    }`}
+                  >
+                    <div className="image-plan-label">
+                      <span className="image-badge">{`图 ${plan.id}`}</span>
+                      <span className="image-type">{plan.name}</span>
+                    </div>
+
+                    <textarea
+                      value={plan.prompt || ''}
+                      onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
+                      rows={plan.taskType === 'main' ? 3 : 4}
+                    />
+
+                    <div className="plan-preview-actions">
+                      <button
+                        type="button"
+                        className="plan-preview-btn"
+                        onClick={() => handlePreviewPrompt(plan)}
+                        disabled={promptPreviewState[plan.id]?.status === 'syncing'}
+                      >
+                        {promptPreviewState[plan.id]?.status === 'syncing'
+                          ? '生成中...'
+                          : plan.executionPromptEn && !plan.promptDirty
+                            ? '更新英文执行稿'
+                            : '生成英文执行稿'}
+                      </button>
+
+                      <span className="help-text">
+                        英文执行稿仅在查看或核对时按需生成，真正点击“开始生成”时系统也会自动处理。
+                      </span>
+                    </div>
+
+                    {promptPreviewState[plan.id]?.message && (
+                      <span
+                        className={`help-text prompt-sync-status prompt-sync-status--${promptPreviewState[plan.id].status}`}
+                      >
+                        {promptPreviewState[plan.id].message}
+                      </span>
+                    )}
+
+                    {plan.promptEn && (
+                      <details className="strategy-english-prompt">
+                        <summary>查看英文策略 Prompt</summary>
+                        <small>{plan.promptEn}</small>
+                      </details>
+                    )}
+
+                    {plan.executionPromptEn && (
+                      <details className="strategy-english-prompt strategy-english-prompt--final">
+                        <summary>查看最终英文执行稿</summary>
+                        <small>{plan.executionPromptEn}</small>
+                      </details>
+                    )}
+
+                    {plan.taskType === 'main' ? (
+                      <span className="help-text">
+                        主图必须优先满足亚马逊规范：白底、全貌、无 Logo、无无关元素。
+                      </span>
+                    ) : (
+                      <span className="help-text">
+                        这里可以继续手动补充你想要的场景、卖点顺序、排版重点或禁用元素。
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

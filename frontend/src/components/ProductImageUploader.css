@@ -22,7 +22,7 @@
 }
 
 .upload-area {
-  margin-bottom: 1rem;
+  margin-bottom: 0.9rem;
 }
 
 .file-input {
@@ -34,12 +34,13 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1.4rem 1.2rem;
   border: 2px dashed #ced4da;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s;
   background: #f8f9fa;
+  min-height: 164px;
 }
 
 .upload-label:hover {
@@ -61,8 +62,8 @@
 }
 
 .upload-icon {
-  font-size: 3rem;
-  margin-bottom: 0.5rem;
+  font-size: 2.2rem;
+  margin-bottom: 0.35rem;
 }
 
 .upload-icon.loading {
@@ -81,30 +82,41 @@
 }
 
 .upload-text {
-  font-size: 1rem;
+  font-size: 0.98rem;
   color: #495057;
-  font-weight: 500;
-  margin-bottom: 0.3rem;
+  font-weight: 600;
+  margin-bottom: 0.22rem;
 }
 
 .upload-hint {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #6c757d;
+  text-align: center;
+  line-height: 1.45;
+}
+
+.image-preview-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.8rem;
+  flex-wrap: wrap;
 }
 
 .image-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 0.85rem;
 }
 
 .preview-item {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   border: 2px solid #e9ecef;
+  background: white;
 }
 
 .preview-item img {
@@ -134,7 +146,7 @@
 
 .preview-number {
   color: white;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 600;
   background: rgba(0, 123, 255, 0.8);
   padding: 0.2rem 0.5rem;
@@ -145,11 +157,11 @@
   background: rgba(220, 53, 69, 0.9);
   color: white;
   border: none;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.95rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -162,11 +174,40 @@
 }
 
 .image-count {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #28a745;
   font-weight: 600;
-  padding: 0.5rem;
+  padding: 0.45rem 0.7rem;
   background: #d4edda;
-  border-radius: 6px;
-  text-align: center;
+  border-radius: 999px;
+}
+
+.upload-more-btn {
+  border: 1px solid #d1d5db;
+  background: white;
+  color: #374151;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upload-more-btn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+@media (max-width: 768px) {
+  .upload-label {
+    min-height: 148px;
+    padding: 1.1rem 1rem;
+  }
+
+  .image-preview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
 }
