@@ -1,10 +1,26 @@
 import { useEffect, useState } from 'react'
 import './ProductImageUploader.css'
 
-export default function ProductImageUploader({ images, onChange }) {
+const MAX_UPLOADS = 5
+const NOTICE_DURATION_MS = 3200
+
+function normalizePrimaryIndex(nextImages, currentPrimaryIndex = 0) {
+  if (!nextImages.length) return 0
+  if (currentPrimaryIndex < 0 || currentPrimaryIndex >= nextImages.length) return 0
+  return currentPrimaryIndex
+}
+
+export default function ProductImageUploader({
+  images,
+  onChange,
+  primaryIndex = 0,
+  onPrimaryChange
+}) {
   const [previewUrls, setPreviewUrls] = useState([])
   const [compressing, setCompressing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [notice, setNotice] = useState(null)
 
   useEffect(() => {
     const nextUrls = (images || []).map((file) => URL.createObjectURL(file))
@@ -18,6 +34,24 @@ export default function ProductImageUploader({ images, onChange }) {
       nextUrls.forEach((url) => URL.revokeObjectURL(url))
     }
   }, [images])
+
+  useEffect(() => {
+    if (!notice) return undefined
+
+    const timer = window.setTimeout(() => {
+      setNotice(null)
+    }, NOTICE_DURATION_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  const imageCount = images?.length || 0
+  const isAtLimit = imageCount >= MAX_UPLOADS
+  const isEmpty = imageCount === 0
+
+  const showNotice = (message, type = 'info') => {
+    setNotice({ message, type, id: Date.now() })
+  }
 
   const compressImage = async (file, maxSize = 1920, quality = 0.82) => {
     const shouldCompress = file.size > 2 * 1024 * 1024
@@ -79,15 +113,37 @@ export default function ProductImageUploader({ images, onChange }) {
     const imageFiles = files.filter((file) => file.type.startsWith('image/'))
     if (imageFiles.length === 0) return
 
+    if (isAtLimit) {
+      showNotice(`最多上传 ${MAX_UPLOADS} 张参考图`, 'warning')
+      return
+    }
+
     setCompressing(true)
 
     try {
       const compressedFiles = await Promise.all(imageFiles.map((file) => compressImage(file)))
-      onChange([...(images || []), ...compressedFiles])
+      const mergedImages = [...(images || []), ...compressedFiles]
+      const trimmedImages = mergedImages.slice(0, MAX_UPLOADS)
+
+      if (mergedImages.length > MAX_UPLOADS) {
+        showNotice(`最多上传 ${MAX_UPLOADS} 张参考图，已自动保留前 ${MAX_UPLOADS} 张。`, 'warning')
+      }
+
+      onChange(trimmedImages)
+      onPrimaryChange?.(normalizePrimaryIndex(trimmedImages, primaryIndex))
     } catch (error) {
       console.error('图片压缩失败:', error)
-      alert('图片压缩失败，已保留原图上传。')
-      onChange([...(images || []), ...imageFiles])
+      showNotice('图片压缩失败，已保留原图上传。', 'warning')
+
+      const mergedImages = [...(images || []), ...imageFiles]
+      const trimmedImages = mergedImages.slice(0, MAX_UPLOADS)
+
+      if (mergedImages.length > MAX_UPLOADS) {
+        showNotice(`最多上传 ${MAX_UPLOADS} 张参考图，已自动保留前 ${MAX_UPLOADS} 张。`, 'warning')
+      }
+
+      onChange(trimmedImages)
+      onPrimaryChange?.(normalizePrimaryIndex(trimmedImages, primaryIndex))
     } finally {
       setCompressing(false)
     }
@@ -100,6 +156,7 @@ export default function ProductImageUploader({ images, onChange }) {
 
   const handleDragOver = (e) => {
     e.preventDefault()
+    if (isAtLimit || compressing) return
     setIsDragging(true)
   }
 
@@ -111,88 +168,177 @@ export default function ProductImageUploader({ images, onChange }) {
   const handleDrop = (e) => {
     e.preventDefault()
     setIsDragging(false)
+
+    if (isAtLimit) {
+      showNotice(`最多上传 ${MAX_UPLOADS} 张参考图`, 'warning')
+      return
+    }
+
     updateImages(Array.from(e.dataTransfer.files || []))
   }
 
   const handleRemoveImage = (index) => {
-    const newFiles = images.filter((_, i) => i !== index)
-    onChange(newFiles)
+    const nextImages = images.filter((_, i) => i !== index)
+    onChange(nextImages)
+
+    if (!nextImages.length) {
+      onPrimaryChange?.(0)
+      return
+    }
+
+    if (index === primaryIndex) {
+      onPrimaryChange?.(0)
+      return
+    }
+
+    if (index < primaryIndex) {
+      onPrimaryChange?.(primaryIndex - 1)
+      return
+    }
+
+    onPrimaryChange?.(normalizePrimaryIndex(nextImages, primaryIndex))
+  }
+
+  const handleClearAll = () => {
+    onChange([])
+    onPrimaryChange?.(0)
+    setNotice(null)
   }
 
   return (
     <div className="product-image-uploader">
-      <div className="uploader-header">
-        <label className="required-label">产品图片 *</label>
-        <span className="help-text">
-          至少上传 1 张产品参考图，支持多张不同角度。再次上传会继续追加，不会覆盖前面已经上传的图片。
-        </span>
-      </div>
+      <div className="uploader-card">
+        <div className="uploader-card-header">
+          <div className="uploader-title-row">
+            <label className="required-label">多视角白底商品&实拍图</label>
+            <div
+              className="uploader-help-anchor"
+              onMouseEnter={() => setShowGuide(true)}
+              onMouseLeave={() => setShowGuide(false)}
+            >
+              <button type="button" className="help-icon-btn" aria-label="查看上传提示">
+                ?
+              </button>
 
-      <div
-        className={`upload-area ${isDragging ? 'dragging' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleFileChange}
-          id="product-image-input"
-          className="file-input"
-          disabled={compressing}
-        />
-        <label
-          htmlFor="product-image-input"
-          className={`upload-label ${compressing ? 'compressing' : ''}`}
-        >
-          {compressing ? (
-            <>
-              <div className="upload-icon loading">{'\u23F3'}</div>
-              <div className="upload-text">正在压缩图片...</div>
-              <div className="upload-hint">只压缩体积，不裁切、不补白、不改变产品全貌</div>
-            </>
-          ) : (
-            <>
-              <div className="upload-icon">{'\u{1F4E4}'}</div>
-              <div className="upload-text">点击或拖拽上传产品图</div>
-              <div className="upload-hint">支持 JPG / PNG / WebP，自动压缩体积，保留原图比例与全貌</div>
-            </>
-          )}
-        </label>
-      </div>
-
-      {previewUrls.length > 0 && (
-        <div className="image-preview-toolbar">
-          <div className="image-count">
-            {'\u2705'} 已上传 {images.length} 张产品图
+              {showGuide && (
+                <div className="uploader-guide-popover">
+                  <strong>图片上传建议：</strong>
+                  <p>建议上传多角度白底产品图，再少量补充实拍图。</p>
+                  <ul>
+                    <li>优先上传完整清晰的产品全貌图</li>
+                    <li>建议 1 张主图 + 2 到 4 张补充角度图</li>
+                    <li>竞品图或风格图不建议混入产品基准图</li>
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
-          <button type="button" className="upload-more-btn" onClick={() => document.getElementById('product-image-input')?.click()}>
-            {'\u2795'} 继续上传
-          </button>
         </div>
-      )}
 
-      {previewUrls.length > 0 && (
-        <div className="image-preview-grid">
-          {previewUrls.map((url, index) => (
-            <div key={url} className="preview-item">
-              <img src={url} alt={`产品图 ${index + 1}`} />
-              <div className="preview-overlay">
-                <span className="preview-number">图 {index + 1}</span>
-                <button
-                  className="remove-btn"
-                  onClick={() => handleRemoveImage(index)}
-                  title="删除"
-                >
-                  {'\u2715'}
-                </button>
+        <div
+          className={`uploader-inner ${isDragging ? 'dragging' : ''} ${isAtLimit ? 'at-limit' : ''} ${
+            isEmpty ? 'empty-state' : ''
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
+            id="product-image-input"
+            className="file-input"
+            disabled={compressing || isAtLimit}
+          />
+
+          {notice && (
+            <div className="upload-popup-layer" aria-live="polite">
+              <div className={`upload-popup upload-popup--${notice.type}`} role="status">
+                <span className="upload-popup-icon">{notice.type === 'warning' ? '!' : 'i'}</span>
+                <span className="upload-popup-text">{notice.message}</span>
               </div>
             </div>
-          ))}
+          )}
+
+          {isEmpty ? (
+            <div className="empty-upload-box">
+              <label
+                htmlFor="product-image-input"
+                className={`upload-primary-btn empty-upload-btn ${compressing || isAtLimit ? 'disabled' : ''}`}
+                aria-disabled={compressing || isAtLimit}
+              >
+                {compressing ? '正在压缩图片...' : '上传'}
+              </label>
+              <div className="empty-upload-spec">10M以内，384*384 ~ 4096*4096，最大宽高比5</div>
+            </div>
+          ) : (
+            <>
+              <div className="image-preview-grid embedded-grid">
+                {previewUrls.map((url, index) => {
+                  const isPrimary = index === primaryIndex
+
+                  return (
+                    <div key={url} className={`preview-card ${isPrimary ? 'is-primary' : ''}`}>
+                      <div className="preview-media">
+                        <img src={url} alt={`产品图 ${index + 1}`} />
+                        <button
+                          type="button"
+                          className="remove-btn"
+                          onClick={() => handleRemoveImage(index)}
+                          title="删除"
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="preview-meta">
+                        {isPrimary ? (
+                          <span className="primary-label">主图</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="set-primary-btn"
+                            onClick={() => onPrimaryChange?.(index)}
+                          >
+                            设为主图
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="uploader-actions">
+                <label
+                  htmlFor="product-image-input"
+                  className={`upload-primary-btn ${compressing || isAtLimit ? 'disabled' : ''}`}
+                  aria-disabled={compressing || isAtLimit}
+                >
+                  {compressing ? '正在压缩图片...' : `上传最多 ${MAX_UPLOADS} 张参考图`}
+                </label>
+
+                <button
+                  type="button"
+                  className="clear-btn"
+                  onClick={handleClearAll}
+                  disabled={!imageCount}
+                >
+                  清空
+                </button>
+              </div>
+
+              <div className="uploader-status-row">
+                <span className={`upload-status ${imageCount ? 'has-images' : ''}`}>
+                  已上传 {imageCount} / {MAX_UPLOADS}
+                </span>
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }

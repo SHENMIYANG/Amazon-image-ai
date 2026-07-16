@@ -64,25 +64,64 @@ export const IMAGE_TASK_OPTIONS = [
   }
 ]
 
-const TYPE_BLUEPRINTS = {
-  main:
-    '按亚马逊主图规范展示产品：纯白背景、完整展示产品全貌、不裁切主体、不加文案、不加 Logo、不加水印、不加无关道具。',
-  feature:
-    '围绕核心卖点做转化型表达，可结合标题、图标、局部特写或轻场景，但产品主体必须清晰，卖点表达要直接。',
-  scenario:
-    '展示产品在真实环境中的使用效果，让买家一眼理解使用场景、氛围感和实际用途，产品要自然融入场景。',
-  detail:
-    '放大展示材质、纹理、结构、工艺、耐用性或关键细节，强调真实质感和可信度，不做夸张变形。',
-  dimensions:
-    '清晰展示尺寸、容量、比例、结构或参照物，帮助买家快速理解产品大小和适配空间。',
-  steps:
-    '用清晰易懂的画面说明使用步骤、安装方式或操作流程，可使用分步布局，但信息不要过满。',
-  comparison:
-    '通过前后对比、竞品对比或效果对比，突出产品优势，画面对比逻辑要清晰，不要虚构不存在的能力。',
-  package:
-    '展示包装、套装、配件或清单信息，让买家知道会收到什么内容，避免添加未确认的配件。',
-  summary:
-    '用于补充整体卖点、礼品属性、信任感、收尾氛围或综合价值表达，起到强化购买理由的作用。'
+const TASK_BLUEPRINTS = {
+  main: '适合亚马逊主图位，重点是白底、全貌、主体清晰和合规展示。',
+  feature: '围绕单一核心卖点做转化表达，突出利益点，不要一张图塞太多信息。',
+  scenario: '把产品放进真实使用环境，让买家快速理解使用场景和氛围。',
+  detail: '放大展示材质、结构、纹理、做工或关键细节，强化真实质感。',
+  dimensions: '清晰表达尺寸、容量、比例关系、适配空间或参照物。',
+  steps: '适合讲解安装步骤、使用动作或操作流程，强调顺序清晰。',
+  comparison: '用真实对比突出产品优势，适合前后对比、普通款与升级款对比。',
+  package: '用于说明包装内容、套装数量、随货配件和到手清单。',
+  summary: '用于补充礼品属性、信任感、多场景总结或综合购买理由。'
+}
+
+const TASK_PLACEHOLDERS = {
+  main: [
+    '【画面目标】白底主图，产品完整居中，保留真实颜色、材质和结构',
+    '【必须满足】无文字、无 Logo、无水印、无多余道具、不要裁切产品',
+    '【可补充】如果有随货配件，只展示确认会一起发货的内容'
+  ],
+  feature: [
+    '【核心卖点】填写这张图最想突出的一条卖点',
+    '【画面方式】局部特写 / 放大结构 / 图标标注 / 功能演示',
+    '【避免】不要一张图塞太多卖点，避免背景和文案抢主体'
+  ],
+  scenario: [
+    '【使用场景】填写真实使用环境，例如庭院、厨房、卧室、车内、露台',
+    '【画面重点】产品自然融入场景，突出使用氛围和体验感',
+    '【避免】场景过假、人物抢主体、产品比例失真'
+  ],
+  detail: [
+    '【细节重点】填写材质 / 做工 / 纹理 / 接缝 / 结构亮点',
+    '【画面方式】近景特写，突出真实质感和工艺细节',
+    '【避免】不要把细节做得像换了材质或改了产品本体'
+  ],
+  dimensions: [
+    '【展示内容】填写长宽高 / 容量 / 适配空间 / 参照物',
+    '【画面方式】清晰标注尺寸和比例关系，方便买家快速判断大小',
+    '【避免】不要把尺寸信息堆得太乱，参照物必须真实合理'
+  ],
+  steps: [
+    '【步骤顺序】填写第 1 步 / 第 2 步 / 第 3 步的关键动作',
+    '【画面方式】分步展示安装或使用流程，动作清晰、顺序明确',
+    '【避免】不要跳步骤，不要一张图塞满大段说明'
+  ],
+  comparison: [
+    '【对比对象】填写竞品对比 / 使用前后 / 普通款 vs 升级款',
+    '【画面重点】突出真实差异点和结果，差别要一眼看懂',
+    '【避免】不要虚构竞品缺陷，不要夸大不存在的能力'
+  ],
+  package: [
+    '【到手内容】填写主产品、配件、数量、包装形式',
+    '【画面方式】平铺展示或整齐陈列，清楚告诉买家会收到什么',
+    '【避免】不要加入未确认配件，不要把包装图做成卖点图'
+  ],
+  summary: [
+    '【收尾重点】填写礼品属性 / 信任补充 / 多场景总结 / 综合购买理由',
+    '【画面方式】用更轻的信息做总结，帮助买家收束决策',
+    '【避免】不要重复前面已经讲清的主卖点和尺寸信息'
+  ]
 }
 
 export function getDefaultImageTaskConfig() {
@@ -129,7 +168,8 @@ export function expandImageTasks(config = {}) {
         label: option.label,
         name: count > 1 ? `${option.defaultName} ${index}` : option.defaultName,
         description: option.description,
-        blueprint: TYPE_BLUEPRINTS[option.type] || ''
+        blueprint: TASK_BLUEPRINTS[option.type] || '',
+        placeholder: TASK_PLACEHOLDERS[option.type]?.join('\n') || ''
       })
     }
   })
@@ -146,13 +186,8 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
 
   return expandImageTasks(config).map((task, index) => {
     const existing = existingByTaskKey.get(task.taskKey)
-    const basePrompt = [
-      `【${task.name}】`,
-      task.blueprint,
-      '配色要求：根据产品图片、产品颜色、材质和使用场景自适应，不套固定模板色。',
-      '语言要求：图片中的标题、标签、卖点和说明文字统一使用当前选择的生成图片语言。',
-      '画面要求：产品主体清晰、构图适合电商转化，避免夸张特效、侵权元素、品牌 Logo 和无关文案。'
-    ].join('\n')
+    const hasPromptValue = existing && Object.prototype.hasOwnProperty.call(existing, 'prompt')
+    const hasPlaceholderValue = existing && Object.prototype.hasOwnProperty.call(existing, 'placeholder')
 
     return {
       id: index + 1,
@@ -161,7 +196,9 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       taskKey: task.taskKey,
       type: task.taskType,
       purpose: task.description,
-      prompt: existing?.prompt || basePrompt,
+      blueprint: task.blueprint,
+      prompt: hasPromptValue ? existing.prompt : '',
+      placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
       promptEn: existing?.promptEn || '',
       executionPromptEn: existing?.executionPromptEn || '',
       promptDirty: existing?.promptDirty || false

@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
     let refImagePaths = []
     if (hasReferenceImages) {
       refImagePaths = referenceImages
-        .slice(0, 3)
+        .slice(0, 1)
         .map((imageUrl) => path.join(process.cwd(), imageUrl.replace('/uploads/', 'uploads/')))
 
       const missingRefPath = refImagePaths.find((imagePath) => !fs.existsSync(imagePath))
@@ -143,20 +143,19 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
   const endpoint = hasReferenceImages ? '/images/edits' : '/images/generations'
   
   if (hasReferenceImages) {
-    refImagePaths.forEach((refImagePath, index) => {
-      const ext = path.extname(refImagePath).toLowerCase()
-      const contentType = ext === '.jpg' || ext === '.jpeg'
-        ? 'image/jpeg'
-        : ext === '.png'
-          ? 'image/png'
-          : ext === '.webp'
-            ? 'image/webp'
-            : 'image/jpeg'
+    const primaryRefPath = refImagePaths[0]
+    const ext = path.extname(primaryRefPath).toLowerCase()
+    const contentType = ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.png'
+        ? 'image/png'
+        : ext === '.webp'
+          ? 'image/webp'
+          : 'image/jpeg'
 
-      form.append(refImagePaths.length > 1 ? 'image[]' : 'image', fs.createReadStream(refImagePath), {
-        filename: path.basename(refImagePath) || `reference-${index + 1}.png`,
-        contentType
-      })
+    form.append('image', fs.createReadStream(primaryRefPath), {
+      filename: path.basename(primaryRefPath) || 'primary-reference.png',
+      contentType
     })
   }
 
@@ -541,6 +540,7 @@ export function buildAmazonPrompt(listing, imagePlan, imageType, complexity = 'L
 
   return prompt
 }
+
 
 export default router
 

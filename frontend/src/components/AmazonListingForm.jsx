@@ -17,11 +17,43 @@ function plansSignature(plans = []) {
       taskType: plan.taskType,
       name: plan.name,
       prompt: plan.prompt,
+      placeholder: plan.placeholder,
       promptEn: plan.promptEn,
       executionPromptEn: plan.executionPromptEn,
       promptDirty: plan.promptDirty
     }))
   )
+}
+
+function getPlanHint(taskType) {
+  const hintMap = {
+    main: '主图优先满足亚马逊规范：白底、全貌、主体清晰，不要 Logo 和无关元素。',
+    dimensions: '尺寸图优先写清尺寸、比例关系、参照物或适配空间，不要堆太多卖点文案。',
+    steps: '步骤图优先写清操作顺序、分步动作和画面逻辑，避免信息过满。',
+    comparison: '对比图只突出真实优势，不要虚构竞品缺陷或夸大不存在的能力。',
+    package: '包装图优先写清包装内容、配件数量和到手清单，避免添加未确认配件。'
+  }
+
+  return hintMap[taskType] || ''
+}
+
+function getListingInfoPlaceholder() {
+  return `可以直接粘贴完整资料，例如：
+【产品名称】：Wireless Bluetooth Headphones with Noise Cancelling
+【产品类目】：Electronics > Headphones
+【尺寸规格】：20 x 18 x 8 cm，300g
+【目标受众】：Busy professionals, students, travelers
+【卖点描述】：
+1. Advanced Noise Cancelling Technology
+2. 40-Hour Battery Life
+3. Comfortable Over-Ear Design`
+}
+
+function getAdditionalInfoPlaceholder() {
+  return `补充说明，例如：
+【使用方式/步骤】：首次使用前先充电 4-6 小时
+【场景图要求】：希望展示花园、露台、夜间氛围
+【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`
 }
 
 export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
@@ -182,18 +214,12 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               <textarea
                 value={listing.listingInfo || listing.sellingPoints || ''}
                 onChange={(event) => onChange('listingInfo', event.target.value)}
-                placeholder={`可以直接粘贴完整资料，例如：
-【产品名称】：Wireless Bluetooth Headphones with Noise Cancelling
-【产品类目】：Electronics > Headphones
-【尺寸规格】：20 x 18 x 8 cm, 300g
-【目标受众】：Busy professionals, students, travelers
-【卖点描述】：1. Advanced Noise Cancelling Technology
-2. 40-Hour Battery Life
-3. Comfortable Over-Ear Design`}
+                placeholder={getListingInfoPlaceholder()}
                 rows={10}
               />
               <span className="help-text">
-                建议至少包含：产品名称、卖点、使用场景、使用方式、尺寸规格、材质、目标受众、竞品线索等。信息越完整，分析和生图越稳。
+                建议至少包含：产品名称、卖点、使用场景、使用方式、尺寸规格、材质、目标受众、竞品线索等。
+                信息越完整，分析和生图越稳。
               </span>
             </div>
 
@@ -202,10 +228,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               <textarea
                 value={listing.additionalInfo || ''}
                 onChange={(event) => onChange('additionalInfo', event.target.value)}
-                placeholder={`补充说明，例如：
-【使用方式/步骤】：首次使用前先充电 4-6 小时
-【场景图要求】：希望展示花园、露台、夜间氛围
-【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`}
+                placeholder={getAdditionalInfoPlaceholder()}
                 rows={4}
               />
               <span className="help-text">
@@ -225,14 +248,14 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             <span className="section-number">{selectedTaskCount} 张图</span>
           </div>
           <p className="section-description">
-            不再固定套用 7 套策略类型。这里直接决定要生成什么图、各出几张，再让 AI 结合产品图、补充信息和自定义设置去生成对应方案。
+            这里不再固定套 7 套模板，而是先决定要出什么图、各出几张，再让 AI 结合参考图、产品信息和补充要求回填策略。
           </p>
 
           <div className="image-task-configurator">
             <div className="image-task-configurator__header">
-              <h4>图片类型与张数</h4>
+              <h4>图片类型和张数</h4>
               <span className="help-text">
-                例如可以只保留 4 张卖点图，不出主图和尺寸图，减少浪费。
+                这里决定本次到底生成哪些图。已经提前做好主图或尺寸图时，可以直接把对应张数调成 0。
               </span>
             </div>
 
@@ -243,8 +266,10 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                 return (
                   <div key={option.type} className="image-task-row">
                     <div className="image-task-copy">
-                      <strong>{option.label}</strong>
-                      <small>{option.description}</small>
+                      <div className="image-task-copy__title">
+                        <strong>{option.label}</strong>
+                        <small>{option.description}</small>
+                      </div>
                     </div>
 
                     <div className="image-task-stepper">
@@ -271,7 +296,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
           </div>
 
           <p className="section-help">
-            AI 会把上传的参考图当作产品一致性的依据：尽量保持产品的外形、颜色、材质、结构和细节统一，不乱改产品本体。
+            AI 会把上传的参考图当作产品一致性的依据，尽量保持外形、颜色、材质、结构和细节统一，不乱改产品本体。
           </p>
 
           {analyzer && <div className="strategy-analyzer-slot">{analyzer}</div>}
@@ -280,7 +305,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             <div className="image-plans-header">
               <h4>已规划 {imagePlans.length} 张图</h4>
               <span className="help-text">
-                这里默认只看中文策略。英文执行稿不会自动请求，只有你手动点某一张时才会生成。
+                这里以中文策略编辑为主。英文执行稿只在你点按钮查看或核对时生成，不会每一张自动请求。
               </span>
             </div>
 
@@ -288,76 +313,72 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               <div className="image-plans-empty">请先选择至少 1 张要生成的图片任务。</div>
             ) : (
               <div className="image-plans-grid image-plans-grid--full">
-                {imagePlans.map((plan) => (
-                  <div
-                    key={plan.id}
-                    className={`form-group image-plan-group ${
-                      plan.taskType === 'main' ? 'image-plan-group--hero' : ''
-                    }`}
-                  >
-                    <div className="image-plan-label">
-                      <span className="image-badge">{`图 ${plan.id}`}</span>
-                      <span className="image-type">{plan.name}</span>
+                {imagePlans.map((plan) => {
+                  const planHint = getPlanHint(plan.taskType)
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`form-group image-plan-group ${
+                        plan.taskType === 'main' ? 'image-plan-group--hero' : ''
+                      }`}
+                    >
+                      <div className="image-plan-label">
+                        <div className="image-plan-heading">
+                          <span className="image-badge">{`图 ${plan.id}`}</span>
+                          <span className="image-type">{plan.name}</span>
+                        </div>
+                        {plan.purpose ? <span className="image-plan-purpose">{plan.purpose}</span> : null}
+                      </div>
+
+                      <textarea
+                        value={plan.prompt || ''}
+                        placeholder={plan.placeholder || ''}
+                        onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
+                        rows={plan.taskType === 'main' ? 3 : 4}
+                      />
+
+                      <div className="plan-preview-actions">
+                        <button
+                          type="button"
+                          className="plan-preview-btn"
+                          onClick={() => handlePreviewPrompt(plan)}
+                          disabled={promptPreviewState[plan.id]?.status === 'syncing'}
+                        >
+                          {promptPreviewState[plan.id]?.status === 'syncing'
+                            ? '生成中...'
+                            : plan.executionPromptEn && !plan.promptDirty
+                              ? '更新英文执行稿'
+                              : '生成英文执行稿'}
+                        </button>
+                      </div>
+
+                      {promptPreviewState[plan.id]?.message && (
+                        <span
+                          className={`help-text prompt-sync-status prompt-sync-status--${promptPreviewState[plan.id].status}`}
+                        >
+                          {promptPreviewState[plan.id].message}
+                        </span>
+                      )}
+
+                      {plan.promptEn && (
+                        <details className="strategy-english-prompt">
+                          <summary>查看英文策略 Prompt</summary>
+                          <small>{plan.promptEn}</small>
+                        </details>
+                      )}
+
+                      {plan.executionPromptEn && (
+                        <details className="strategy-english-prompt strategy-english-prompt--final">
+                          <summary>查看最终英文执行稿</summary>
+                          <small>{plan.executionPromptEn}</small>
+                        </details>
+                      )}
+
+                      {planHint ? <span className="help-text">{planHint}</span> : null}
                     </div>
-
-                    <textarea
-                      value={plan.prompt || ''}
-                      onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
-                      rows={plan.taskType === 'main' ? 3 : 4}
-                    />
-
-                    <div className="plan-preview-actions">
-                      <button
-                        type="button"
-                        className="plan-preview-btn"
-                        onClick={() => handlePreviewPrompt(plan)}
-                        disabled={promptPreviewState[plan.id]?.status === 'syncing'}
-                      >
-                        {promptPreviewState[plan.id]?.status === 'syncing'
-                          ? '生成中...'
-                          : plan.executionPromptEn && !plan.promptDirty
-                            ? '更新英文执行稿'
-                            : '生成英文执行稿'}
-                      </button>
-
-                      <span className="help-text">
-                        英文执行稿仅在查看或核对时按需生成，真正点击“开始生成”时系统也会自动处理。
-                      </span>
-                    </div>
-
-                    {promptPreviewState[plan.id]?.message && (
-                      <span
-                        className={`help-text prompt-sync-status prompt-sync-status--${promptPreviewState[plan.id].status}`}
-                      >
-                        {promptPreviewState[plan.id].message}
-                      </span>
-                    )}
-
-                    {plan.promptEn && (
-                      <details className="strategy-english-prompt">
-                        <summary>查看英文策略 Prompt</summary>
-                        <small>{plan.promptEn}</small>
-                      </details>
-                    )}
-
-                    {plan.executionPromptEn && (
-                      <details className="strategy-english-prompt strategy-english-prompt--final">
-                        <summary>查看最终英文执行稿</summary>
-                        <small>{plan.executionPromptEn}</small>
-                      </details>
-                    )}
-
-                    {plan.taskType === 'main' ? (
-                      <span className="help-text">
-                        主图必须优先满足亚马逊规范：白底、全貌、无 Logo、无无关元素。
-                      </span>
-                    ) : (
-                      <span className="help-text">
-                        这里可以继续手动补充你想要的场景、卖点顺序、排版重点或禁用元素。
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
