@@ -162,7 +162,7 @@ function App() {
     brandColor: '',
     designNotes: '',
     additionalInfo: '',
-    complexity: 'L1',
+    complexity: 'L2',
     globalRules: null,
     globalConstraints: null,
     productBlueprint: null,

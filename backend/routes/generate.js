@@ -93,7 +93,7 @@ router.post('/', async (req, res) => {
         const prompt = buildAmazonPrompt(
           executionListing,
           normalizedPlan,
-          complexity || 'L1',
+          complexity || 'L2',
           size,
           explicitPrimaryReferenceImageUrl
         )
@@ -139,7 +139,7 @@ router.post('/', async (req, res) => {
           prompt: buildAmazonPrompt(
             executionListing,
             plan,
-            complexity || 'L1',
+            complexity || 'L2',
             size,
             explicitPrimaryReferenceImageUrl
           )
@@ -1014,7 +1014,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
 export function buildAmazonPrompt(
   listing,
   imagePlan,
-  complexity = 'L1',
+  complexity = 'L2',
   resolution = '2048x2048',
   primaryReferenceImageUrl = ''
 ) {

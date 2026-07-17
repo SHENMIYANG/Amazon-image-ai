@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import GenerationPreferences from './GenerationPreferences'
 import {
   IMAGE_TASK_OPTIONS,
@@ -58,8 +58,6 @@ function plansSignature(plans = []) {
       copy: plan.copy,
       visualBlueprint: plan.visualBlueprint,
       promptHint: plan.promptHint,
-      promptEn: plan.promptEn,
-      executionPromptEn: plan.executionPromptEn,
       promptDirty: plan.promptDirty
     }))
   )
@@ -88,27 +86,25 @@ const COMPLEXITY_LEVELS = [
   {
     value: 'L1',
     label: 'L1 极速版',
-    icon: '⚡',
-    description: '适合低价铺货和快速出图，画面更简洁。'
+    icon: '1',
+    description: '更适合低价铺货和快速出图，一张图只讲一个重点。'
   },
   {
     value: 'L2',
     label: 'L2 标准版',
-    icon: '◫',
-    description: '适合大多数 SKU，卖点、场景和信息更均衡。'
+    icon: '2',
+    description: '适合大多数 SKU，卖点、场景和信息完整度更均衡。'
   },
   {
     value: 'L3',
     label: 'L3 精品版',
-    icon: '✦',
-    description: '适合重点款，画面细节和质感会更重。'
+    icon: '3',
+    description: '适合重点款，层级、质感和视觉控制更强。'
   }
 ]
 
 export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
-  const [promptPreviewState, setPromptPreviewState] = useState({})
   const [expandedEditor, setExpandedEditor] = useState(null)
-  const previewRequestIdsRef = useRef({})
   const showProductSection = mode === 'full' || mode === 'product'
   const showStrategySection = mode === 'full' || mode === 'strategy'
 
@@ -130,8 +126,6 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
   }, [showStrategySection, normalizedTaskConfig, imagePlans, onChange])
 
   const handleImagePlanChange = (imageId, prompt) => {
-    previewRequestIdsRef.current[imageId] = `dirty-${Date.now()}`
-
     onChange(
       'imagePlans',
       imagePlans.map((plan) =>
@@ -141,17 +135,13 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               promptHint: prompt,
               prompt,
               promptEn: '',
+              executionPrompt: '',
               executionPromptEn: '',
               promptDirty: true
             }
           : plan
       )
     )
-
-    setPromptPreviewState((prev) => ({
-      ...prev,
-      [imageId]: null
-    }))
   }
 
   const handleTaskCountChange = (taskType, nextCount) => {
@@ -173,103 +163,6 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
     if (!expandedEditor) return
     onChange(expandedEditor.field, expandedEditor.value)
     setExpandedEditor(null)
-  }
-
-  const handlePreviewPrompt = async (plan) => {
-    const sourcePrompt = plan?.prompt || plan?.promptHint || ''
-    if (!sourcePrompt || sourcePrompt.trim() === '') {
-      setPromptPreviewState((prev) => ({
-        ...prev,
-        [plan.id]: {
-          status: 'error',
-          message: '请先填写这张图的中文策略，再生成英文执行稿。'
-        }
-      }))
-      return
-    }
-
-    const requestId = Date.now() + plan.id
-    previewRequestIdsRef.current[plan.id] = requestId
-
-    setPromptPreviewState((prev) => ({
-      ...prev,
-      [plan.id]: {
-        status: 'syncing',
-        message: '正在生成英文执行稿...'
-      }
-    }))
-
-    try {
-      const response = await fetch('/api/prompt-preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listing,
-          plan: {
-            id: plan.id,
-            name: plan.name,
-            type: plan.type,
-            taskType: plan.taskType,
-            taskKey: plan.taskKey,
-            purpose: plan.purpose,
-            goal: plan.goal,
-            layout: plan.layout,
-            focus: plan.focus,
-            visualFocus: plan.visualFocus,
-            textDensity: plan.textDensity,
-            style: plan.style,
-            visualKeywords: plan.visualKeywords,
-            constraints: plan.constraints,
-            hardConstraints: plan.hardConstraints,
-            copy: plan.copy,
-            visualBlueprint: plan.visualBlueprint,
-            promptHint: plan.promptHint || sourcePrompt,
-            prompt: sourcePrompt,
-            promptEn: plan.promptEn,
-            promptDirty: plan.promptDirty
-          },
-          resolution: '2048x2048'
-        })
-      })
-
-      const result = await response.json()
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || '英文执行稿生成失败')
-      }
-
-      if (previewRequestIdsRef.current[plan.id] !== requestId) return
-
-      onChange('imagePlans', (currentPlans = []) =>
-        currentPlans.map((item) =>
-          item.id === plan.id
-            ? {
-                ...item,
-                promptEn: result.data.promptEn || '',
-                executionPromptEn: result.data.executionPromptEn || '',
-                promptDirty: false
-              }
-            : item
-        )
-      )
-
-      setPromptPreviewState((prev) => ({
-        ...prev,
-        [plan.id]: {
-          status: 'success',
-          message: '英文执行稿已生成，可展开查看。'
-        }
-      }))
-    } catch (error) {
-      if (previewRequestIdsRef.current[plan.id] !== requestId) return
-
-      setPromptPreviewState((prev) => ({
-        ...prev,
-        [plan.id]: {
-          status: 'error',
-          message: error.message || '英文执行稿生成失败'
-        }
-      }))
-    }
   }
 
   return (
@@ -320,7 +213,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             <div className="form-group">
               <div className="form-group-header">
                 <label className="label-with-help">
-                  补充信息（可选）
+                  补充信息
                   <InlineHelpTip
                     width="300px"
                     content="这里适合补充使用方式、场景要求、禁用元素、卖点顺序、排版偏好等，属于对主信息的定向补充。"
@@ -435,74 +328,43 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
           <div className="image-plans-container">
             <div className="image-plans-header">
               <h4>已规划 {imagePlans.length} 张图</h4>
+              <p className="image-plans-review-note">
+                这里只给你看中文策略。你修改后会自动保存，真正点击开始生成时，系统才会在后台自动转换成英文执行稿再去生图。
+              </p>
             </div>
 
             {imagePlans.length === 0 ? (
               <div className="image-plans-empty">请先选择至少 1 张要生成的图片任务。</div>
             ) : (
               <div className="image-plans-grid image-plans-grid--full">
-                {imagePlans.map((plan) => {
-                  return (
-                    <div
-                      key={plan.id}
-                      className={`form-group image-plan-group ${
-                        plan.taskType === 'main' ? 'image-plan-group--hero' : ''
-                      }`}
-                    >
-                      <div className="image-plan-label">
-                        <div className="image-plan-heading">
-                          <span className="image-badge">{`图 ${plan.id}`}</span>
-                          <span className="image-type">{plan.name}</span>
-                        </div>
-                        {plan.purpose ? <span className="image-plan-purpose">{plan.purpose}</span> : null}
+                {imagePlans.map((plan) => (
+                  <div
+                    key={plan.id}
+                    className={`form-group image-plan-group ${plan.taskType === 'main' ? 'image-plan-group--hero' : ''}`}
+                  >
+                    <div className="image-plan-label">
+                      <div className="image-plan-heading">
+                        <span className="image-badge">{`图 ${plan.id}`}</span>
+                        <span className="image-type">{plan.name}</span>
                       </div>
-
-                      <textarea
-                        value={plan.prompt || ''}
-                        placeholder={plan.placeholder || ''}
-                        onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
-                        rows={plan.taskType === 'main' ? 3 : 4}
-                      />
-
-                      <div className="plan-preview-actions">
-                        <button
-                          type="button"
-                          className="plan-preview-btn"
-                          onClick={() => handlePreviewPrompt(plan)}
-                          disabled={promptPreviewState[plan.id]?.status === 'syncing'}
-                        >
-                          {promptPreviewState[plan.id]?.status === 'syncing'
-                            ? '生成中...'
-                            : plan.executionPromptEn && !plan.promptDirty
-                              ? '更新英文执行稿'
-                              : '生成英文执行稿'}
-                        </button>
-                      </div>
-
-                      {promptPreviewState[plan.id]?.message && (
-                        <span
-                          className={`help-text prompt-sync-status prompt-sync-status--${promptPreviewState[plan.id].status}`}
-                        >
-                          {promptPreviewState[plan.id].message}
-                        </span>
-                      )}
-
-                      {plan.promptEn && (
-                        <details className="strategy-english-prompt">
-                          <summary>查看英文策略 Prompt</summary>
-                          <small>{plan.promptEn}</small>
-                        </details>
-                      )}
-
-                      {plan.executionPromptEn && (
-                        <details className="strategy-english-prompt strategy-english-prompt--final">
-                          <summary>查看最终英文执行稿</summary>
-                          <small>{plan.executionPromptEn}</small>
-                        </details>
-                      )}
+                      {plan.purpose ? <span className="image-plan-purpose">{plan.purpose}</span> : null}
                     </div>
-                  )
-                })}
+
+                    <div className="image-plan-strategy-meta">
+                      <span className="image-plan-strategy-tag">中文策略</span>
+                      <span className="image-plan-strategy-status">
+                        {plan.promptDirty ? '已修改，生成时会自动同步英文执行稿' : '当前策略可直接用于生成'}
+                      </span>
+                    </div>
+
+                    <textarea
+                      value={plan.prompt || ''}
+                      placeholder={plan.placeholder || ''}
+                      onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
+                      rows={plan.taskType === 'main' ? 5 : 6}
+                    />
+                  </div>
+                ))}
               </div>
             )}
           </div>

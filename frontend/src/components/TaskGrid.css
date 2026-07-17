@@ -198,24 +198,7 @@
 }
 
 .english-prompt-details {
-  padding: 0.5rem 0.7rem;
-  background: #f8fbff;
-  border-bottom: 1px solid #e1e4e8;
-  font-size: 0.75rem;
-  color: #4b5563;
-}
-
-.english-prompt-details summary {
-  color: #0056b3;
-  font-weight: 700;
-  cursor: pointer;
-  margin-bottom: 0.35rem;
-}
-
-.english-prompt-details small {
-  display: block;
-  line-height: 1.45;
-  white-space: pre-wrap;
+  display: none;
 }
 
 .image-badge {

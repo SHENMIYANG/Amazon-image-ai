@@ -157,7 +157,7 @@ export function buildListingPayload(source = {}, { includeGenerationSettings = f
   }
 
   if (includeGenerationSettings) {
-    payload.complexity = source.complexity || 'L1'
+    payload.complexity = source.complexity || 'L2'
   }
 
   return compactObject(payload)
@@ -185,7 +185,7 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     dimensions: listing.dimensions || parsedSections.dimensions,
     material: listing.material || parsedSections.material,
     targetAudience: listing.targetAudience || parsedSections.targetAudience,
-    complexity: listing.complexity || 'L1',
+    complexity: listing.complexity || 'L2',
     selectedImageTasks,
     referenceImages,
     primaryReferenceImageUrl
@@ -229,7 +229,7 @@ export function buildGenerateRequest(
   referenceImages = [],
   primaryReferenceImageUrl = ''
 ) {
-  const complexity = sourceListing.complexity || 'L1'
+  const complexity = sourceListing.complexity || 'L2'
 
   return compactObject({
     listing: buildListingPayload(sourceListing, { stripAnalysisArtifacts: true }),

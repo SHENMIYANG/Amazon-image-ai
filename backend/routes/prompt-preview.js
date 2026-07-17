@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
     const executionPromptEn = buildAmazonPrompt(
       listing,
       normalizedPlan,
-      listing.complexity || 'L1',
+      listing.complexity || 'L2',
       resolution || '2048x2048',
       listing.primaryReferenceImageUrl || ''
     )

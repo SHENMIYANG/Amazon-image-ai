@@ -800,7 +800,7 @@ Product Input
 - Target Audience: ${trimForModel(targetAudience || 'Not provided', 500)}
 - Additional Info: ${trimForModel(additionalInfo || 'None', 1200)}
 - Custom Design Notes: ${trimForModel(designNotes || 'None', 600)}
-- Complexity: ${complexity || 'L1'}
+- Complexity: ${complexity || 'L2'}
 
 Selling Points
 ${trimForModel(sellingPoints, 1200)}
@@ -908,7 +908,7 @@ Planning Guidance
       productBlueprint,
       imagePlans: result.imagePlans,
       _meta: {
-        complexity: complexity || 'L1',
+        complexity: complexity || 'L2',
         requestedImageCount: requestedTasks.length,
         generatedAt: new Date().toISOString()
       }
