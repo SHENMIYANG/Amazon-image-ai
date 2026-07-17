@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import FormData from 'form-data'
 import fs from 'fs'
 import path from 'path'
+import { ensureUploadsDir } from '../utils/uploads.js'
 
 dotenv.config()
 
@@ -18,7 +19,7 @@ router.get('/status', (req, res) => {
 
 // 测试接口
 router.post('/', async (req, res) => {
-  const testImagePath = path.join(process.cwd(), 'uploads', `test-${Date.now()}.png`)
+  const testImagePath = path.join(ensureUploadsDir(), `test-${Date.now()}.png`)
 
   try {
     const { IMAGE_GEN_BASE_URL, IMAGE_GEN_API_KEY, IMAGE_GENERATION_MODEL } = process.env
@@ -34,8 +35,7 @@ router.post('/', async (req, res) => {
     }
 
     // 确保 uploads 目录存在
-    const uploadsDir = path.join(process.cwd(), 'uploads')
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
+    ensureUploadsDir()
 
     // 最小有效 PNG（1x1 像素）
     const minimalPng = Buffer.from(

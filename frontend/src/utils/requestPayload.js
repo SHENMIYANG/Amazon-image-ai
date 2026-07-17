@@ -125,7 +125,7 @@ export function parseListingInfoSections(listingInfo = '') {
   return compactObject(result)
 }
 
-export function buildListingPayload(source = {}, { includeGenerationSettings = false } = {}) {
+export function buildListingPayload(source = {}, { includeGenerationSettings = false, stripAnalysisArtifacts = false } = {}) {
   const parsedSections = parseListingInfoSections(source.listingInfo || source.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(source.selectedImageTasks)
 
@@ -150,15 +150,20 @@ export function buildListingPayload(source = {}, { includeGenerationSettings = f
     selectedImageTasks
   }
 
+  if (!stripAnalysisArtifacts) {
+    payload.globalRules = source.globalRules || source.globalConstraints
+    payload.globalConstraints = source.globalConstraints
+    payload.productBlueprint = source.productBlueprint
+  }
+
   if (includeGenerationSettings) {
-    payload.imageType = source._meta?.strategyUsed || source.imageType || 'basic'
-    payload.complexity = source.complexity || 'L2'
+    payload.complexity = source.complexity || 'L1'
   }
 
   return compactObject(payload)
 }
 
-export function buildAnalyzeRequest(listing = {}, referenceImages = []) {
+export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryReferenceImageUrl = '') {
   const parsedSections = parseListingInfoSections(listing.listingInfo || listing.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(listing.selectedImageTasks)
 
@@ -180,9 +185,10 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = []) {
     dimensions: listing.dimensions || parsedSections.dimensions,
     material: listing.material || parsedSections.material,
     targetAudience: listing.targetAudience || parsedSections.targetAudience,
-    complexity: listing.complexity || 'L2',
+    complexity: listing.complexity || 'L1',
     selectedImageTasks,
-    referenceImages
+    referenceImages,
+    primaryReferenceImageUrl
   })
 }
 
@@ -194,22 +200,45 @@ export function buildPlanPayload(plan = {}) {
     taskType: plan.taskType,
     taskKey: plan.taskKey,
     purpose: plan.purpose,
+    goal: plan.goal,
+    layout: plan.layout,
+    focus: plan.focus,
+    visualFocus: plan.visualFocus,
+    textDensity: plan.textDensity,
+    style: plan.style,
+    visualKeywords: plan.visualKeywords,
+    constraints: plan.constraints,
+    hardConstraints: plan.hardConstraints,
+    successCriteria: plan.successCriteria,
+    failureCriteria: plan.failureCriteria,
+    copy: plan.copy,
+    visualBlueprint: plan.visualBlueprint,
+    promptHint: plan.promptHint,
     prompt: plan.prompt,
     promptEn: plan.promptEn,
+    executionPrompt: plan.executionPrompt,
+    executionPromptEn: plan.executionPromptEn,
     promptDirty: plan.promptDirty ? true : undefined
   })
 }
 
-export function buildGenerateRequest(sourceListing = {}, plan = {}, resolution, referenceImages = []) {
-  const imageType = sourceListing._meta?.strategyUsed || sourceListing.imageType || 'basic'
-  const complexity = sourceListing.complexity || 'L2'
+export function buildGenerateRequest(
+  sourceListing = {},
+  plan = {},
+  resolution,
+  referenceImages = [],
+  primaryReferenceImageUrl = ''
+) {
+  const complexity = sourceListing.complexity || 'L1'
 
   return compactObject({
-    listing: buildListingPayload(sourceListing),
+    listing: buildListingPayload(sourceListing, { stripAnalysisArtifacts: true }),
     imagePlans: [buildPlanPayload(plan)],
-    imageType,
     complexity,
     resolution,
-    referenceImages
+    referenceImages,
+    primaryReferenceImageUrl,
+    globalRules: sourceListing.globalRules || sourceListing.globalConstraints,
+    productBlueprint: sourceListing.productBlueprint
   })
 }

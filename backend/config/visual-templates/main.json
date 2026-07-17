@@ -1,0 +1,24 @@
+{
+  "camera": "Front three-quarter or front view",
+  "composition": "Centered product",
+  "crop": "Product occupies about 85% of frame",
+  "lighting": "Soft studio lighting",
+  "background": "Pure white RGB 255,255,255",
+  "text": "No text",
+  "safeArea": {
+    "top": "8%",
+    "bottom": "8%",
+    "left": "8%",
+    "right": "8%"
+  },
+  "typographyRules": [
+    "No text overlays on the main image."
+  ],
+  "negativeRules": [
+    "No crop.",
+    "No decorative props.",
+    "No added logo.",
+    "No watermark."
+  ],
+  "style": "Amazon hero image"
+}

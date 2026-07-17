@@ -1,0 +1,23 @@
+{
+  "camera": "Straight product view",
+  "composition": "Centered product with annotation space",
+  "crop": "Full product visible with measurement callouts",
+  "lighting": "Neutral product lighting",
+  "background": "Clean infographic background",
+  "text": "Structured measurement labels",
+  "safeArea": {
+    "top": "10%",
+    "bottom": "12%",
+    "left": "10%",
+    "right": "10%"
+  },
+  "typographyRules": [
+    "Keep labels short and clear.",
+    "Do not repeat the same measurement twice."
+  ],
+  "negativeRules": [
+    "Do not overcrowd the canvas with too many labels.",
+    "Do not hide important structure behind labels."
+  ],
+  "style": "Technical size explanation"
+}

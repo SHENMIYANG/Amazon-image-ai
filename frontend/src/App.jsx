@@ -8,6 +8,7 @@ import SettingsModal from './components/SettingsModal'
 import SettingsButton from './components/SettingsButton'
 import AgentAnalyzer from './components/AgentAnalyzer'
 import { getMarketplaceDefaultLanguage } from './components/GenerationPreferences'
+import { parseApiJson } from './utils/apiResponse'
 import {
   buildGenerateRequest,
   buildListingPayload,
@@ -17,9 +18,17 @@ import {
 import {
   buildDefaultPlansFromTasks,
   getDefaultImageTaskConfig,
-  getSelectedImageTaskCount
+  getSelectedImageTaskCount,
+  MAIN_IMAGE_FIXED_RULE
 } from './utils/imageTasks'
 import './App.css'
+
+function mergeMainImageRule(prompt = '') {
+  const normalizedPrompt = String(prompt || '').trim()
+  if (!normalizedPrompt) return MAIN_IMAGE_FIXED_RULE
+  if (normalizedPrompt.includes('【目的】提升点击率（CTR）')) return normalizedPrompt
+  return `${MAIN_IMAGE_FIXED_RULE}\n${normalizedPrompt}`
+}
 
 function parseImageResolution(resolution) {
   if (resolution === '2k') return { width: 2048, height: 2048 }
@@ -82,55 +91,59 @@ function orderImagesByPrimary(images = [], primaryIndex = 0) {
   return [primaryImage, ...secondaryImages]
 }
 
-function buildNonJsonResponseMessage(label, response, rawText) {
-  const trimmed = String(rawText || '').trim()
-  const looksLikeHtml = trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || trimmed.startsWith('<')
-  const suffix = response?.status ? `（HTTP ${response.status}）` : ''
-
-  if (looksLikeHtml) {
-    return `${label}返回了 HTML 页面${suffix}，通常是后端未启动、接口路由未命中，或代理/Nginx 转发异常。`
-  }
-
-  const preview = trimmed ? trimmed.slice(0, 180) : '空响应'
-  return `${label}返回的不是 JSON${suffix}：${preview}`
+function getPrimaryReferenceImageUrl(images = []) {
+  return Array.isArray(images) && images.length > 0 ? images[0] : ''
 }
 
-async function parseApiResponse(response, label) {
-  const contentType = response.headers.get('content-type') || ''
-  const rawText = await response.text()
+function buildImageVersionSnapshot(image = {}) {
+  if (!image?.imageUrl) return null
 
-  let data = null
-  if (rawText) {
-    if (contentType.includes('application/json')) {
-      try {
-        data = JSON.parse(rawText)
-      } catch {
-        throw new Error(`${label}返回了损坏的 JSON，请检查后端响应格式。`)
-      }
-    } else {
-      const trimmed = rawText.trim()
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          data = JSON.parse(trimmed)
-        } catch {
-          throw new Error(buildNonJsonResponseMessage(label, response, rawText))
-        }
-      } else {
-        throw new Error(buildNonJsonResponseMessage(label, response, rawText))
-      }
-    }
+  return {
+    imageUrl: image.imageUrl,
+    prompt: image.prompt || '',
+    promptEn: image.promptEn || '',
+    actualResolution: image.actualResolution || null,
+    requestedResolution: image.requestedResolution || null,
+    sizeMatchesRequest: image.sizeMatchesRequest,
+    savedAt: new Date().toISOString()
   }
-
-  if (!response.ok) {
-    throw new Error(data?.message || `${label}失败（HTTP ${response.status}）`)
-  }
-
-  if (!data) {
-    throw new Error(`${label}返回为空，请检查后端服务。`)
-  }
-
-  return data
 }
+
+function markPlansAsStale(plans = []) {
+  return (plans || []).map((plan) => ({
+    ...plan,
+    promptEn: '',
+    executionPromptEn: '',
+    promptDirty: true
+  }))
+}
+
+function buildInvalidatedAnalysisState(prev, { preservePlans = true } = {}) {
+  return {
+    globalRules: null,
+    globalConstraints: null,
+    productBlueprint: null,
+    _meta: undefined,
+    imagePlans: preservePlans ? markPlansAsStale(prev.imagePlans || []) : []
+  }
+}
+
+const ANALYSIS_INVALIDATING_FIELDS = new Set([
+  'productName',
+  'category',
+  'dimensions',
+  'material',
+  'targetAudience',
+  'sellingPoints',
+  'additionalInfo',
+  'marketplace',
+  'imageLanguage',
+  'fontPreference',
+  'brandColorMode',
+  'brandColor',
+  'designNotes',
+  'selectedImageTasks'
+])
 
 function App() {
   const [listing, setListing] = useState({
@@ -144,19 +157,22 @@ function App() {
     marketplace: 'UK',
     imageLanguage: getMarketplaceDefaultLanguage('UK'),
     imageLanguageTouched: false,
-    imageType: 'basic',
     fontPreference: 'auto',
     brandColorMode: 'auto',
     brandColor: '',
     designNotes: '',
     additionalInfo: '',
-    complexity: 'L2',
+    complexity: 'L1',
+    globalRules: null,
+    globalConstraints: null,
+    productBlueprint: null,
     selectedImageTasks: getDefaultImageTaskConfig(),
     imagePlans: []
   })
   
   const [productImages, setProductImages] = useState([])
   const [primaryProductImageIndex, setPrimaryProductImageIndex] = useState(0)
+  const [uploadedReferenceImages, setUploadedReferenceImages] = useState([])
   
   const [selectedResolution, setSelectedResolution] = useState('2k')
   const [tasks, setTasks] = useState([])
@@ -190,13 +206,14 @@ function App() {
       const parsedSections = parseListingInfoSections(value)
       setListing(prev => ({
         ...prev,
+        ...buildInvalidatedAnalysisState(prev),
         listingInfo: value,
         productName: parsedSections.productName || extractProductName(value),
         sellingPoints: parsedSections.sellingPoints || value,
-        category: parsedSections.category || '',
-        dimensions: parsedSections.dimensions || '',
-        material: parsedSections.material || '',
-        targetAudience: parsedSections.targetAudience || ''
+        category: parsedSections.category || prev.category || '',
+        dimensions: parsedSections.dimensions || prev.dimensions || '',
+        material: parsedSections.material || prev.material || '',
+        targetAudience: parsedSections.targetAudience || prev.targetAudience || ''
       }))
       return
     }
@@ -212,6 +229,7 @@ function App() {
 
         return {
           ...prev,
+          ...buildInvalidatedAnalysisState(prev),
           marketplace: value,
           imageLanguage: shouldSyncLanguage ? nextDefaultLanguage : prev.imageLanguage,
           imageLanguageTouched: shouldSyncLanguage ? false : prev.imageLanguageTouched
@@ -223,8 +241,18 @@ function App() {
     if (field === 'imageLanguage') {
       setListing((prev) => ({
         ...prev,
+        ...buildInvalidatedAnalysisState(prev),
         imageLanguage: value,
         imageLanguageTouched: true
+      }))
+      return
+    }
+
+    if (ANALYSIS_INVALIDATING_FIELDS.has(field)) {
+      setListing((prev) => ({
+        ...prev,
+        ...buildInvalidatedAnalysisState(prev),
+        [field]: value
       }))
       return
     }
@@ -233,11 +261,35 @@ function App() {
   }
 
   const handleAgentAnalyzeComplete = (analysisResult) => {
-    const { imagePlans, _meta } = analysisResult
+    const { imagePlans, _meta, globalRules, globalConstraints, productBlueprint } = analysisResult
+    const normalizedPlans = (imagePlans || []).map((plan) =>
+      plan?.taskType === 'main'
+        ? (() => {
+            const existingMainPrompt =
+              (listing.imagePlans || []).find((item) => item?.taskType === 'main')?.prompt || ''
+            const mergedPrompt = mergeMainImageRule(
+              existingMainPrompt || plan.promptHint || plan.prompt || MAIN_IMAGE_FIXED_RULE
+            )
+
+            return {
+              ...plan,
+              promptHint: mergedPrompt,
+              prompt: mergedPrompt
+            }
+          })()
+        : {
+            ...plan,
+            promptHint: plan.promptHint || plan.prompt || '',
+            prompt: plan.prompt || plan.promptHint || ''
+          }
+    )
+
     setListing(prev => ({
       ...prev,
-      imagePlans: imagePlans,
-      imageType: _meta?.strategyUsed || prev.imageType,
+      imagePlans: normalizedPlans,
+      globalRules: globalRules || globalConstraints || prev.globalRules || prev.globalConstraints || null,
+      globalConstraints: globalConstraints || prev.globalConstraints || null,
+      productBlueprint: productBlueprint || prev.productBlueprint || null,
       _meta: _meta
     }))
     
@@ -276,9 +328,23 @@ function App() {
         taskType: plan.taskType,
         status: 'pending',
         imageUrl: null,
+        goal: plan.goal || '',
+        layout: plan.layout || '',
+        focus: plan.focus || '',
+        visualFocus: plan.visualFocus || '',
+        textDensity: plan.textDensity || '',
+        style: plan.style || '',
+        visualKeywords: plan.visualKeywords || [],
+        constraints: plan.constraints || [],
+        hardConstraints: plan.hardConstraints || [],
+        copy: plan.copy || [],
+        visualBlueprint: plan.visualBlueprint || null,
+        promptHint: plan.promptHint || '',
         prompt: plan.prompt,
         promptEn: plan.promptEn || '',
         promptDirty: plan.promptDirty || false,
+        versions: [],
+        regenerationError: null,
         error: null,
         actualResolution: null,
         requestedResolution: selectedResolution === '4k' ? '4096x4096' : '2048x2048'
@@ -291,36 +357,41 @@ function App() {
     setTasks(prev => [newTask, ...prev])
     
     try {
-      const formData = new FormData()
-      const orderedProductImages = orderImagesByPrimary(productImages, primaryProductImageIndex)
-      orderedProductImages.forEach(img => formData.append('images', img))
+      let referenceImages = uploadedReferenceImages
 
-      const uploadResponse = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-      const uploadData = await parseApiResponse(uploadResponse, '图片上传接口')
+      if (!referenceImages.length) {
+        const formData = new FormData()
+        const orderedProductImages = orderImagesByPrimary(productImages, primaryProductImageIndex)
+        orderedProductImages.forEach(img => formData.append('images', img))
 
-      if (!uploadData.success) {
-        throw new Error('图片上传失败')
+        const uploadResponse = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        })
+        const uploadData = await parseApiJson(uploadResponse, '图片上传接口')
+
+        if (!uploadData.success) {
+          throw new Error('图片上传失败')
+        }
+
+        referenceImages = uploadData.images.map(img => img.url)
+        setUploadedReferenceImages(referenceImages)
       }
 
-      const referenceImages = uploadData.images.map(img => img.url)
+      const primaryReferenceImageUrl = getPrimaryReferenceImageUrl(referenceImages)
 
       setTasks(prev => prev.map(task => {
         if (task.id === taskId) {
-          return { ...task, referenceImages }
+          return { ...task, referenceImages, primaryReferenceImageUrl }
         }
         return task
       }))
 
-      let aborted = false
       for (let i = 0; i < allPlans.length; i++) {
         const plan = allPlans[i]
         
         if (stoppingRef.current) {
           console.log('用户取消生成')
-          aborted = true
           setTasks(prev => prev.map(task => {
             if (task.id === taskId) {
               return { ...task, status: 'stopped' }
@@ -328,12 +399,6 @@ function App() {
             return task
           }))
           break
-        }
-        
-        const currentTask = tasks.find(t => t.id === taskId)
-        if (currentTask && currentTask.images[plan.id - 1]?.status === 'failed') {
-          console.log(`图${plan.id} 已失败，跳过`)
-          continue
         }
         
         setTasks(prev => prev.map(task => {
@@ -352,9 +417,17 @@ function App() {
           const generateResponse = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildGenerateRequest(listingSnapshot, plan, selectedResolution, referenceImages))
+            body: JSON.stringify(
+              buildGenerateRequest(
+                listingSnapshot,
+                plan,
+                selectedResolution,
+                referenceImages,
+                primaryReferenceImageUrl
+              )
+            )
           })
-          const data = await parseApiResponse(generateResponse, `图片生成接口（图${plan.id}）`)
+          const data = await parseApiJson(generateResponse, `图片生成接口（图${plan.id}）`)
           
           const generatedImage = data.images && data.images[0]
           const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
@@ -376,6 +449,8 @@ function App() {
                           prompt: generatedImage.promptZh || img.prompt,
                           promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                           promptDirty: false,
+                          versions: img.versions || [],
+                          regenerationError: null,
                           actualResolution: generatedImage.actualResolution || null,
                           requestedResolution: generatedImage.resolution || img.requestedResolution,
                           sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -429,6 +504,19 @@ function App() {
       
     } catch (error) {
       console.error('生成失败:', error)
+      setTasks(prev => prev.map(task => {
+        if (task.id !== taskId) return task
+
+        return {
+          ...task,
+          status: 'failed',
+          images: task.images.map(img =>
+            img.status === 'completed'
+              ? img
+              : { ...img, status: 'failed', error: error.message }
+          )
+        }
+      }))
       alert('生成失败：' + error.message)
     } finally {
       setGenerating(false)
@@ -445,6 +533,18 @@ function App() {
       name: image.name,
       type: image.taskType,
       taskType: image.taskType,
+      goal: image.goal || '',
+      layout: image.layout || '',
+      focus: image.focus || '',
+      visualFocus: image.visualFocus || '',
+      textDensity: image.textDensity || '',
+      style: image.style || '',
+      visualKeywords: image.visualKeywords || [],
+      constraints: image.constraints || [],
+      hardConstraints: image.hardConstraints || [],
+      copy: image.copy || [],
+      visualBlueprint: image.visualBlueprint || null,
+      promptHint: image.promptHint || '',
       prompt: newPrompt || image.prompt,
       promptEn: newPrompt ? '' : image.promptEn,
       promptDirty: Boolean(newPrompt)
@@ -454,6 +554,9 @@ function App() {
       alert('这张图片没有可用的 Prompt')
       return
     }
+
+    const previousVersion = buildImageVersionSnapshot(image)
+    const hadCurrentImage = Boolean(image.imageUrl)
     
     const taskId = Date.now()
     setCurrentTaskId(taskId)
@@ -465,7 +568,12 @@ function App() {
           ...t,
           images: t.images.map((img, idx) => {
             if (idx === imageIndex) {
-              return { ...img, status: 'generating', error: null }
+              return {
+                ...img,
+                status: 'regenerating',
+                error: null,
+                regenerationError: null
+              }
             }
             return img
           })
@@ -476,6 +584,8 @@ function App() {
     
     try {
       const taskListing = task.listing || buildListingPayload(listing, { includeGenerationSettings: true })
+      const primaryReferenceImageUrl =
+        task.primaryReferenceImageUrl || getPrimaryReferenceImageUrl(task.referenceImages || [])
       const generateResponse = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -484,11 +594,12 @@ function App() {
             taskListing,
             planToUse,
             task.resolution || selectedResolution,
-            task.referenceImages || []
+            task.referenceImages || [],
+            primaryReferenceImageUrl
           )
         )
       })
-      const data = await parseApiResponse(generateResponse, `图片生成接口（图${image.imageId}）`)
+      const data = await parseApiJson(generateResponse, `图片生成接口（图${image.imageId}）`)
       
       const generatedImage = data.images && data.images[0]
       const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
@@ -500,6 +611,10 @@ function App() {
               ...t,
               images: t.images.map((img, idx) => {
                 if (idx === imageIndex) {
+                  const nextVersions = previousVersion
+                    ? [previousVersion, ...(Array.isArray(img.versions) ? img.versions : [])].slice(0, 8)
+                    : (img.versions || [])
+
                   return { 
                     ...img, 
                     status: 'completed', 
@@ -510,6 +625,8 @@ function App() {
                     prompt: generatedImage.promptZh || img.prompt,
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                     promptDirty: false,
+                    versions: nextVersions,
+                    regenerationError: null,
                     actualResolution: generatedImage.actualResolution || null,
                     requestedResolution: generatedImage.resolution || img.requestedResolution,
                     sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -537,8 +654,9 @@ function App() {
               if (idx === imageIndex) {
                 return { 
                   ...img, 
-                  status: 'failed', 
-                  error: error.message 
+                  status: hadCurrentImage ? 'completed' : 'failed',
+                  error: hadCurrentImage ? null : error.message,
+                  regenerationError: error.message
                 }
               }
               return img
@@ -580,6 +698,18 @@ function App() {
         name: img.name,
         type: img.taskType,
         taskType: img.taskType,
+        goal: img.goal || '',
+        layout: img.layout || '',
+        focus: img.focus || '',
+        visualFocus: img.visualFocus || '',
+        textDensity: img.textDensity || '',
+        style: img.style || '',
+        visualKeywords: img.visualKeywords || [],
+        constraints: img.constraints || [],
+        hardConstraints: img.hardConstraints || [],
+        copy: img.copy || [],
+        visualBlueprint: img.visualBlueprint || null,
+        promptHint: img.promptHint || '',
         prompt: img.prompt,
         promptEn: img.promptEn,
         promptDirty: img.promptDirty
@@ -600,6 +730,8 @@ function App() {
     }))
     
     const referenceImages = task.referenceImages || []
+    const primaryReferenceImageUrl =
+      task.primaryReferenceImageUrl || getPrimaryReferenceImageUrl(referenceImages)
     
     let aborted = false
     for (let i = 0; i < pendingPlans.length; i++) {
@@ -633,9 +765,17 @@ function App() {
         const generateResponse = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildGenerateRequest(task.listing, plan, task.resolution, referenceImages))
+          body: JSON.stringify(
+            buildGenerateRequest(
+              task.listing,
+              plan,
+              task.resolution,
+              referenceImages,
+              primaryReferenceImageUrl
+            )
+          )
         })
-        const data = await parseApiResponse(generateResponse, `图片生成接口（图${plan.id}）`)
+        const data = await parseApiJson(generateResponse, `图片生成接口（图${plan.id}）`)
         
         const generatedImage = data.images && data.images[0]
         const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
@@ -656,6 +796,8 @@ function App() {
                     prompt: generatedImage.promptZh || img.prompt,
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                     promptDirty: false,
+                    versions: img.versions || [],
+                    regenerationError: null,
                     actualResolution: generatedImage.actualResolution || null,
                     requestedResolution: generatedImage.resolution || img.requestedResolution,
                     sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -764,20 +906,32 @@ function App() {
             <section className="section workspace-panel">
               <div className="panel-heading">
                 <h2>产品素材</h2>
-                <p>先上传产品参考图，再补充 Listing 信息和卖点。</p>
               </div>
               <ProductImageUploader
                 images={productImages}
-                onChange={setProductImages}
+                onChange={(images) => {
+                  setProductImages(images)
+                  setUploadedReferenceImages([])
+                  setListing((prev) => ({
+                    ...prev,
+                    ...buildInvalidatedAnalysisState(prev)
+                  }))
+                }}
                 primaryIndex={primaryProductImageIndex}
-                onPrimaryChange={setPrimaryProductImageIndex}
+                onPrimaryChange={(index) => {
+                  setPrimaryProductImageIndex(index)
+                  setUploadedReferenceImages([])
+                  setListing((prev) => ({
+                    ...prev,
+                    ...buildInvalidatedAnalysisState(prev)
+                  }))
+                }}
               />
             </section>
 
             <section className="section workspace-panel">
               <div className="panel-heading">
                 <h2>商品输入与偏好</h2>
-                <p>这里统一填写产品信息、补充要求和生成偏好，作为后续分析与生图输入。</p>
               </div>
               <AmazonListingForm
                 listing={listing}
@@ -791,7 +945,6 @@ function App() {
             <section className="section workspace-panel">
               <div className="panel-heading">
                 <h2>出图规划</h2>
-                <p>先确定要出什么图、各出几张，再由 AI 结合参考图和产品信息补全方案。</p>
               </div>
               <AmazonListingForm
                 listing={listing}
@@ -801,6 +954,9 @@ function App() {
                   <AgentAnalyzer
                     listing={listing}
                     productImages={orderImagesByPrimary(productImages, primaryProductImageIndex)}
+                    referenceImages={uploadedReferenceImages}
+                    primaryReferenceImageUrl={getPrimaryReferenceImageUrl(uploadedReferenceImages)}
+                    onReferenceImagesChange={setUploadedReferenceImages}
                     onAnalyzeComplete={handleAgentAnalyzeComplete}
                   />
                 }
@@ -812,7 +968,6 @@ function App() {
             <section className="section workspace-panel action-panel">
               <div className="panel-heading">
                 <h2>开始生成</h2>
-                <p>先选输出分辨率，再按当前任务数量开始生成。</p>
               </div>
               <div className="stack-panel-group action-panel-group">
                 <div className="sub-panel compact-sub-panel">
@@ -848,7 +1003,6 @@ function App() {
             <section className="section workspace-panel results-panel">
               <div className="panel-heading">
                 <h2>生成结果</h2>
-                <p>这里展示当前任务、预览、下载和单张重生成功能。</p>
               </div>
               <TaskGrid
                 tasks={tasks}

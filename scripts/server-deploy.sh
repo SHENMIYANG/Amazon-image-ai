@@ -9,6 +9,8 @@ BACKEND_PORT="${BACKEND_PORT:-3001}"
 NGINX_CONF="/etc/nginx/conf.d/${DOMAIN}.conf"
 SSL_DIR="/etc/nginx/ssl/${DOMAIN}"
 ACME_ROOT="/var/www/acme"
+AUTH_FILE="${AUTH_FILE:-/etc/nginx/.htpasswd-image-studio}"
+AUTH_CREDENTIALS_FILE="${AUTH_CREDENTIALS_FILE:-/root/.amazon-image-studio-credentials}"
 
 log() {
   printf '\n[deploy] %s\n' "$1"
@@ -106,6 +108,32 @@ restart_pm2() {
   pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
 }
 
+configure_basic_auth() {
+  if [ -f "$AUTH_FILE" ]; then
+    return
+  fi
+
+  if ! command -v htpasswd >/dev/null 2>&1; then
+    dnf install -y httpd-tools
+  fi
+
+  local auth_user="${BASIC_AUTH_USER:-amazon}"
+  local auth_password="${BASIC_AUTH_PASSWORD:-$(openssl rand -hex 12)}"
+
+  htpasswd -bc "$AUTH_FILE" "$auth_user" "$auth_password" >/dev/null
+  chown root:nginx "$AUTH_FILE"
+  chmod 640 "$AUTH_FILE"
+
+  {
+    echo "URL: https://${DOMAIN}"
+    echo "Username: ${auth_user}"
+    echo "Password: ${auth_password}"
+  } > "$AUTH_CREDENTIALS_FILE"
+  chmod 600 "$AUTH_CREDENTIALS_FILE"
+
+  log "Created login credentials in ${AUTH_CREDENTIALS_FILE}"
+}
+
 write_nginx_http() {
   log "Writing HTTP Nginx config"
   mkdir -p "$ACME_ROOT/.well-known/acme-challenge"
@@ -124,6 +152,9 @@ server {
     }
 
     location / {
+        auth_basic "Amazon Image Studio";
+        auth_basic_user_file ${AUTH_FILE};
+
         proxy_pass http://127.0.0.1:${BACKEND_PORT};
         proxy_http_version 1.1;
 
@@ -133,8 +164,8 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
 
         proxy_connect_timeout 60s;
-        proxy_send_timeout 180s;
-        proxy_read_timeout 180s;
+        proxy_send_timeout 360s;
+        proxy_read_timeout 360s;
     }
 }
 EOF
@@ -170,6 +201,9 @@ server {
     ssl_certificate_key ${SSL_DIR}/key.pem;
 
     location / {
+        auth_basic "Amazon Image Studio";
+        auth_basic_user_file ${AUTH_FILE};
+
         proxy_pass http://127.0.0.1:${BACKEND_PORT};
         proxy_http_version 1.1;
 
@@ -179,8 +213,8 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
 
         proxy_connect_timeout 60s;
-        proxy_send_timeout 180s;
-        proxy_read_timeout 180s;
+        proxy_send_timeout 360s;
+        proxy_read_timeout 360s;
     }
 }
 EOF
@@ -215,6 +249,9 @@ If HTTPS cert files exist, open:
 Health check:
   curl http://127.0.0.1:${BACKEND_PORT}/api/health
 
+Login credentials:
+  ${AUTH_CREDENTIALS_FILE}
+
 EOF
 }
 
@@ -229,6 +266,7 @@ main() {
       check_env
       build_project
       restart_pm2
+      configure_basic_auth
       configure_nginx
       print_status
       ;;
@@ -237,10 +275,12 @@ main() {
       check_env
       build_project
       restart_pm2
+      configure_basic_auth
       configure_nginx
       print_status
       ;;
     nginx)
+      configure_basic_auth
       configure_nginx
       print_status
       ;;

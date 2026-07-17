@@ -9,6 +9,34 @@ import {
 } from '../utils/imageTasks'
 import './AmazonListingForm.css'
 
+function InlineHelpTip({ content, width = '260px' }) {
+  return (
+    <span className="inline-help-tip">
+      <button type="button" className="help-icon-btn" aria-label="查看说明">
+        ?
+      </button>
+      <span className="inline-help-tip__popover" style={{ width }}>
+        {content}
+      </span>
+    </span>
+  )
+}
+
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M7 5h8v8M15 5 9 11M12 15H5V8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function plansSignature(plans = []) {
   return JSON.stringify(
     plans.map((plan) => ({
@@ -18,23 +46,23 @@ function plansSignature(plans = []) {
       name: plan.name,
       prompt: plan.prompt,
       placeholder: plan.placeholder,
+      goal: plan.goal,
+      layout: plan.layout,
+      focus: plan.focus,
+      visualFocus: plan.visualFocus,
+      textDensity: plan.textDensity,
+      style: plan.style,
+      visualKeywords: plan.visualKeywords,
+      constraints: plan.constraints,
+      hardConstraints: plan.hardConstraints,
+      copy: plan.copy,
+      visualBlueprint: plan.visualBlueprint,
+      promptHint: plan.promptHint,
       promptEn: plan.promptEn,
       executionPromptEn: plan.executionPromptEn,
       promptDirty: plan.promptDirty
     }))
   )
-}
-
-function getPlanHint(taskType) {
-  const hintMap = {
-    main: '主图优先满足亚马逊规范：白底、全貌、主体清晰，不要 Logo 和无关元素。',
-    dimensions: '尺寸图优先写清尺寸、比例关系、参照物或适配空间，不要堆太多卖点文案。',
-    steps: '步骤图优先写清操作顺序、分步动作和画面逻辑，避免信息过满。',
-    comparison: '对比图只突出真实优势，不要虚构竞品缺陷或夸大不存在的能力。',
-    package: '包装图优先写清包装内容、配件数量和到手清单，避免添加未确认配件。'
-  }
-
-  return hintMap[taskType] || ''
 }
 
 function getListingInfoPlaceholder() {
@@ -56,8 +84,30 @@ function getAdditionalInfoPlaceholder() {
 【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`
 }
 
+const COMPLEXITY_LEVELS = [
+  {
+    value: 'L1',
+    label: 'L1 极速版',
+    icon: '⚡',
+    description: '适合低价铺货和快速出图，画面更简洁。'
+  },
+  {
+    value: 'L2',
+    label: 'L2 标准版',
+    icon: '◫',
+    description: '适合大多数 SKU，卖点、场景和信息更均衡。'
+  },
+  {
+    value: 'L3',
+    label: 'L3 精品版',
+    icon: '✦',
+    description: '适合重点款，画面细节和质感会更重。'
+  }
+]
+
 export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
   const [promptPreviewState, setPromptPreviewState] = useState({})
+  const [expandedEditor, setExpandedEditor] = useState(null)
   const previewRequestIdsRef = useRef({})
   const showProductSection = mode === 'full' || mode === 'product'
   const showStrategySection = mode === 'full' || mode === 'strategy'
@@ -88,6 +138,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
         plan.id === imageId
           ? {
               ...plan,
+              promptHint: prompt,
               prompt,
               promptEn: '',
               executionPromptEn: '',
@@ -110,8 +161,23 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
     })
   }
 
+  const openExpandedEditor = (config) => {
+    setExpandedEditor(config)
+  }
+
+  const closeExpandedEditor = () => {
+    setExpandedEditor(null)
+  }
+
+  const saveExpandedEditor = () => {
+    if (!expandedEditor) return
+    onChange(expandedEditor.field, expandedEditor.value)
+    setExpandedEditor(null)
+  }
+
   const handlePreviewPrompt = async (plan) => {
-    if (!plan?.prompt || plan.prompt.trim() === '') {
+    const sourcePrompt = plan?.prompt || plan?.promptHint || ''
+    if (!sourcePrompt || sourcePrompt.trim() === '') {
       setPromptPreviewState((prev) => ({
         ...prev,
         [plan.id]: {
@@ -145,7 +211,20 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             type: plan.type,
             taskType: plan.taskType,
             taskKey: plan.taskKey,
-            prompt: plan.prompt,
+            purpose: plan.purpose,
+            goal: plan.goal,
+            layout: plan.layout,
+            focus: plan.focus,
+            visualFocus: plan.visualFocus,
+            textDensity: plan.textDensity,
+            style: plan.style,
+            visualKeywords: plan.visualKeywords,
+            constraints: plan.constraints,
+            hardConstraints: plan.hardConstraints,
+            copy: plan.copy,
+            visualBlueprint: plan.visualBlueprint,
+            promptHint: plan.promptHint || sourcePrompt,
+            prompt: sourcePrompt,
             promptEn: plan.promptEn,
             promptDirty: plan.promptDirty
           },
@@ -202,38 +281,75 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               <h3>产品信息</h3>
               <span className="section-number">基础输入</span>
             </div>
-            <p className="section-description">
-              把产品 Listing 信息、核心卖点、使用场景、使用方式、尺寸材质等尽量集中放在这里。
-              AI 分析和后续生图都会以这里的内容为主。
-            </p>
 
             <div className="form-group unified-listing-input">
-              <label>
-                产品 Listing 信息 + 核心卖点 <span className="required">*</span>
-              </label>
-              <textarea
-                value={listing.listingInfo || listing.sellingPoints || ''}
-                onChange={(event) => onChange('listingInfo', event.target.value)}
-                placeholder={getListingInfoPlaceholder()}
-                rows={10}
-              />
-              <span className="help-text">
-                建议至少包含：产品名称、卖点、使用场景、使用方式、尺寸规格、材质、目标受众、竞品线索等。
-                信息越完整，分析和生图越稳。
-              </span>
+              <div className="form-group-header">
+                <label className="label-with-help">
+                  产品 Listing 信息 + 核心卖点 <span className="required">*</span>
+                  <InlineHelpTip
+                    width="300px"
+                    content="这里统一填写产品名称、卖点、规格、材质、受众、类目等关键信息，AI 会把它当作后续分析和生成的核心输入。"
+                  />
+                </label>
+              </div>
+              <div className="expandable-textarea">
+                <textarea
+                  value={listing.listingInfo || listing.sellingPoints || ''}
+                  onChange={(event) => onChange('listingInfo', event.target.value)}
+                  placeholder={getListingInfoPlaceholder()}
+                  rows={5}
+                />
+                <button
+                  type="button"
+                  className="textarea-expand-icon"
+                  onClick={() =>
+                    openExpandedEditor({
+                      field: 'listingInfo',
+                      title: '产品 Listing 信息 + 核心卖点',
+                      placeholder: getListingInfoPlaceholder(),
+                      value: listing.listingInfo || listing.sellingPoints || ''
+                    })
+                  }
+                  title="放大编辑"
+                >
+                  <ExpandIcon />
+                </button>
+              </div>
             </div>
 
             <div className="form-group">
-              <label>补充信息（可选）</label>
-              <textarea
-                value={listing.additionalInfo || ''}
-                onChange={(event) => onChange('additionalInfo', event.target.value)}
-                placeholder={getAdditionalInfoPlaceholder()}
-                rows={4}
-              />
-              <span className="help-text">
-                这里适合填写禁用内容、额外场景要求、包装说明、礼品属性，或者你不想丢给 AI 自己猜的细节。
-              </span>
+              <div className="form-group-header">
+                <label className="label-with-help">
+                  补充信息（可选）
+                  <InlineHelpTip
+                    width="300px"
+                    content="这里适合补充使用方式、场景要求、禁用元素、卖点顺序、排版偏好等，属于对主信息的定向补充。"
+                  />
+                </label>
+              </div>
+              <div className="expandable-textarea">
+                <textarea
+                  value={listing.additionalInfo || ''}
+                  onChange={(event) => onChange('additionalInfo', event.target.value)}
+                  placeholder={getAdditionalInfoPlaceholder()}
+                  rows={3}
+                />
+                <button
+                  type="button"
+                  className="textarea-expand-icon"
+                  onClick={() =>
+                    openExpandedEditor({
+                      field: 'additionalInfo',
+                      title: '补充信息',
+                      placeholder: getAdditionalInfoPlaceholder(),
+                      value: listing.additionalInfo || ''
+                    })
+                  }
+                  title="放大编辑"
+                >
+                  <ExpandIcon />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -247,16 +363,10 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             <h3>出图任务规划</h3>
             <span className="section-number">{selectedTaskCount} 张图</span>
           </div>
-          <p className="section-description">
-            这里不再固定套 7 套模板，而是先决定要出什么图、各出几张，再让 AI 结合参考图、产品信息和补充要求回填策略。
-          </p>
 
           <div className="image-task-configurator">
             <div className="image-task-configurator__header">
               <h4>图片类型和张数</h4>
-              <span className="help-text">
-                这里决定本次到底生成哪些图。已经提前做好主图或尺寸图时，可以直接把对应张数调成 0。
-              </span>
             </div>
 
             <div className="image-task-list">
@@ -295,18 +405,36 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             </div>
           </div>
 
-          <p className="section-help">
-            AI 会把上传的参考图当作产品一致性的依据，尽量保持外形、颜色、材质、结构和细节统一，不乱改产品本体。
-          </p>
+          <div className="strategy-complexity-block">
+            <div className="strategy-complexity-header">
+              <h4>出图复杂度</h4>
+            </div>
+
+            <div className="strategy-complexity-grid">
+              {COMPLEXITY_LEVELS.map((level) => (
+                <button
+                  key={level.value}
+                  type="button"
+                  className={`strategy-complexity-card ${listing.complexity === level.value ? 'active' : ''}`}
+                  onClick={() => onChange('complexity', level.value)}
+                >
+                  <span className="strategy-complexity-icon" aria-hidden="true">
+                    {level.icon}
+                  </span>
+                  <span className="strategy-complexity-copy">
+                    <strong>{level.label}</strong>
+                    <small>{level.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           {analyzer && <div className="strategy-analyzer-slot">{analyzer}</div>}
 
           <div className="image-plans-container">
             <div className="image-plans-header">
               <h4>已规划 {imagePlans.length} 张图</h4>
-              <span className="help-text">
-                这里以中文策略编辑为主。英文执行稿只在你点按钮查看或核对时生成，不会每一张自动请求。
-              </span>
             </div>
 
             {imagePlans.length === 0 ? (
@@ -314,8 +442,6 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             ) : (
               <div className="image-plans-grid image-plans-grid--full">
                 {imagePlans.map((plan) => {
-                  const planHint = getPlanHint(plan.taskType)
-
                   return (
                     <div
                       key={plan.id}
@@ -374,13 +500,53 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                           <small>{plan.executionPromptEn}</small>
                         </details>
                       )}
-
-                      {planHint ? <span className="help-text">{planHint}</span> : null}
                     </div>
                   )
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {expandedEditor && (
+        <div className="editor-modal-overlay" onClick={closeExpandedEditor}>
+          <div className="editor-modal-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="editor-modal-header">
+              <div>
+                <h4>{expandedEditor.title}</h4>
+                <p>这里可以放大填写，保存后会同步回当前表单。</p>
+              </div>
+              <button type="button" className="editor-modal-close" onClick={closeExpandedEditor}>
+                ×
+              </button>
+            </div>
+
+            <textarea
+              className="editor-modal-textarea"
+              value={expandedEditor.value}
+              placeholder={expandedEditor.placeholder}
+              onChange={(event) =>
+                setExpandedEditor((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        value: event.target.value
+                      }
+                    : prev
+                )
+              }
+              rows={18}
+            />
+
+            <div className="editor-modal-footer">
+              <button type="button" className="editor-modal-btn editor-modal-btn--ghost" onClick={closeExpandedEditor}>
+                取消
+              </button>
+              <button type="button" className="editor-modal-btn editor-modal-btn--primary" onClick={saveExpandedEditor}>
+                保存
+              </button>
+            </div>
           </div>
         </div>
       )}

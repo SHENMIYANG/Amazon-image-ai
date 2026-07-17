@@ -7,6 +7,7 @@ backend/node_modules/
 frontend/dist/
 backend/uploads/
 backend/logs/
+backend/test-output/
 
 # Environment variables (DO NOT commit API keys)
 .env

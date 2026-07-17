@@ -1,9 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
+import { parseApiJson } from '../utils/apiResponse'
 import { buildAnalyzeRequest } from '../utils/requestPayload'
 import { getSelectedImageTaskCount } from '../utils/imageTasks'
 import './AgentAnalyzer.css'
 
-export default function AgentAnalyzer({ listing, productImages = [], onAnalyzeComplete }) {
+const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+async function requestAnalysis(listing, referenceImages, primaryReferenceImageUrl) {
+  const maxAttempts = 3
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch('/api/agent-analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages, primaryReferenceImageUrl))
+      })
+
+      return await parseApiJson(response, '分析失败')
+    } catch (error) {
+      const transientStatus = [500, 502, 503, 504].includes(Number(error.status))
+      const shouldRetry = attempt < maxAttempts && (error.emptyResponse || transientStatus)
+      if (!shouldRetry) throw error
+      await wait(1200)
+    }
+  }
+
+  throw new Error('分析请求重试后仍未返回结果')
+}
+
+async function settleUploadedFiles() {
+  await wait(600)
+}
+
+export default function AgentAnalyzer({
+  listing,
+  productImages = [],
+  referenceImages = [],
+  primaryReferenceImageUrl = '',
+  onReferenceImagesChange,
+  onAnalyzeComplete
+}) {
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -52,44 +91,29 @@ export default function AgentAnalyzer({ listing, productImages = [], onAnalyzeCo
     setSuccessMessage(null)
 
     try {
-      const formData = new FormData()
-      productImages.forEach((img) => formData.append('images', img))
+      let uploadedReferenceImages = referenceImages
 
-      const uploadResponse = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-      const uploadData = await uploadResponse.json()
+      if (!uploadedReferenceImages.length) {
+        const formData = new FormData()
+        productImages.forEach((img) => formData.append('images', img))
 
-      if (!uploadData.success) {
-        throw new Error(uploadData.message || '产品图片上传失败')
-      }
+        const uploadResponse = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        })
+        const uploadData = await parseApiJson(uploadResponse, '产品图片上传失败')
 
-      const referenceImages = uploadData.images.map((img) => img.url)
-
-      const response = await fetch('/api/agent-analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages))
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        let errorMessage = '分析失败'
-
-        try {
-          const errorJson = JSON.parse(errorText)
-          errorMessage = errorJson.message || errorMessage
-        } catch {
-          errorMessage = errorText || errorMessage
+        if (!uploadData.success) {
+          throw new Error(uploadData.message || '产品图片上传失败')
         }
 
-        throw new Error(errorMessage)
+        uploadedReferenceImages = uploadData.images.map((img) => img.url)
+        onReferenceImagesChange?.(uploadedReferenceImages)
+        await settleUploadedFiles()
       }
 
-      const result = await response.json()
+      const explicitPrimaryReferenceImageUrl = primaryReferenceImageUrl || uploadedReferenceImages[0] || ''
+      const result = await requestAnalysis(listing, uploadedReferenceImages, explicitPrimaryReferenceImageUrl)
       onAnalyzeComplete(result.data)
 
       setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图回填详细方案。`)
@@ -111,9 +135,6 @@ export default function AgentAnalyzer({ listing, productImages = [], onAnalyzeCo
     <div className="agent-analyzer">
       <div className="analyzer-header">
         <h3>AI 智能分析</h3>
-        <span className="help-text">
-          AI 会结合产品图片、Listing 信息、补充信息、语言、品牌主色和字体偏好，为当前选中的 {selectedImageCount} 张图生成更完整的策略方案。
-        </span>
       </div>
 
       <button
@@ -143,21 +164,6 @@ export default function AgentAnalyzer({ listing, productImages = [], onAnalyzeCo
       {successMessage && <div className="success-message">{successMessage}</div>}
 
       {error && <div className="error-message">{error}</div>}
-
-      <div className="analyzer-features">
-        <div className="feature-item">
-          <span className="feature-icon">1</span>
-          <span>结合产品图和 Listing 信息一起分析</span>
-        </div>
-        <div className="feature-item">
-          <span className="feature-icon">2</span>
-          <span>把卖点映射到你当前勾选的图片任务</span>
-        </div>
-        <div className="feature-item">
-          <span className="feature-icon">3</span>
-          <span>补全中文策略说明，英文执行稿改为按需查看</span>
-        </div>
-      </div>
     </div>
   )
 }

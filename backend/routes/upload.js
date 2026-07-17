@@ -1,18 +1,14 @@
 import express from 'express'
 import multer from 'multer'
 import path from 'path'
-import fs from 'fs'
+import { ensureUploadsDir } from '../utils/uploads.js'
 
 const router = express.Router()
 
 // 配置 multer 存储
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(process.cwd(), 'uploads')
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-    cb(null, uploadDir)
+    cb(null, ensureUploadsDir())
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
@@ -36,13 +32,14 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB 限制
+    fileSize: 10 * 1024 * 1024,
+    files: 5
   },
   fileFilter: fileFilter
 })
 
 // 上传接口
-router.post('/', upload.array('images', 10), (req, res) => {
+router.post('/', upload.array('images', 5), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -81,6 +78,12 @@ router.use((error, req, res, next) => {
       return res.status(400).json({
         error: 'File too large',
         message: '图片大小不能超过 10MB'
+      })
+    }
+    if (error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({
+        error: 'Too many files',
+        message: '最多上传 5 张产品图片'
       })
     }
     return res.status(400).json({

@@ -8,6 +8,7 @@ import uploadRoutes from './routes/upload.js'
 import testApiKeyRoutes from './routes/testApiKey.js'
 import agentAnalyzeRoutes from './routes/agent-analyze.js'
 import promptPreviewRoutes from './routes/prompt-preview.js'
+import { cleanupExpiredUploads, ensureUploadsDir, UPLOADS_DIR } from './utils/uploads.js'
 
 dotenv.config()
 
@@ -17,10 +18,15 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const PORT = process.env.BACKEND_PORT || 3001
 const NODE_ENV = process.env.NODE_ENV || 'development'
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '4mb'
 
 // Middleware
-app.use(cors())
-app.use(express.json())
+if (NODE_ENV !== 'production') {
+  app.use(cors())
+} else if (process.env.CORS_ORIGIN) {
+  app.use(cors({ origin: process.env.CORS_ORIGIN }))
+}
+app.use(express.json({ limit: JSON_BODY_LIMIT }))
 
 // Routes
 app.use('/api/upload', uploadRoutes)
@@ -30,7 +36,19 @@ app.use('/api/agent-analyze', agentAnalyzeRoutes)
 app.use('/api/prompt-preview', promptPreviewRoutes)
 
 // Serve uploaded images (development)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
+ensureUploadsDir()
+app.use('/uploads', express.static(UPLOADS_DIR))
+
+const uploadRetentionHours = Math.max(1, Number(process.env.UPLOAD_RETENTION_HOURS || 24))
+const cleanupUploads = () => {
+  const deletedCount = cleanupExpiredUploads(uploadRetentionHours * 60 * 60 * 1000)
+  if (deletedCount > 0) {
+    console.log(`已清理 ${deletedCount} 个过期上传文件`)
+  }
+}
+
+cleanupUploads()
+setInterval(cleanupUploads, 6 * 60 * 60 * 1000).unref()
 
 // Health check
 app.get('/api/health', (req, res) => {

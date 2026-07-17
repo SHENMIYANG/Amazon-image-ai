@@ -1,0 +1,23 @@
+{
+  "camera": "Eye-level realistic scene view",
+  "composition": "Product-first in scene",
+  "crop": "Product remains clearly readable inside environment",
+  "lighting": "Natural believable lighting",
+  "background": "Real usage environment",
+  "text": "Minimal optional copy",
+  "safeArea": {
+    "top": "10%",
+    "bottom": "10%",
+    "left": "8%",
+    "right": "8%"
+  },
+  "typographyRules": [
+    "Keep scene readable.",
+    "Avoid copy blocking contact points or installation logic."
+  ],
+  "negativeRules": [
+    "Do not let the environment overpower the product.",
+    "Do not fake impossible support or mounting."
+  ],
+  "style": "Lifestyle scene"
+}

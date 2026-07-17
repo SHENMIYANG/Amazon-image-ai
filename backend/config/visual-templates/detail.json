@@ -1,0 +1,22 @@
+{
+  "camera": "Close-up detail angle",
+  "composition": "Tight crop on product detail",
+  "crop": "Macro or close detail framing",
+  "lighting": "Directional soft light",
+  "background": "Clean neutral support background",
+  "text": "Optional short callout",
+  "safeArea": {
+    "top": "8%",
+    "bottom": "8%",
+    "left": "8%",
+    "right": "8%"
+  },
+  "typographyRules": [
+    "Use only short callouts if needed."
+  ],
+  "negativeRules": [
+    "Do not make the material look different from the real product.",
+    "Do not replace the real structure with fantasy detail."
+  ],
+  "style": "Material close-up"
+}

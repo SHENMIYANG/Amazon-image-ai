@@ -1,66 +1,90 @@
-import express from 'express'
-import OpenAI from 'openai'
+﻿import express from 'express'
 import fs from 'fs'
 import path from 'path'
-import { STRATEGY_LIBRARY } from '../strategy-library.js'
+import OpenAI from 'openai'
+import { buildGlobalRules } from '../config/globalRules.js'
+import {
+  getMarketplaceLanguage,
+  inferArchetype,
+  normalizeConfidenceValue,
+  normalizeStringArray
+} from '../utils/productModel.js'
+import { isTransientUpstreamError } from '../utils/upstreamRetry.js'
+import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
+import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../utils/uploads.js'
 
 const router = express.Router()
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 const IMAGE_TASK_LIBRARY = {
   main: {
-    label: '主图',
-    defaultName: '白底主图',
-    purpose: '符合亚马逊主图规范并完整展示产品',
-    guidance: '纯白背景、完整展示产品全貌、不裁切主体、无文字、无 Logo、无水印、无无关道具'
+    defaultName: 'Main Image',
+    purpose: 'Follow Amazon main-image rules and improve click-through rate',
+    guidance: 'Pure white background, full product visible, no text, no decorative props'
   },
   feature: {
-    label: '卖点图',
-    defaultName: '核心卖点图',
-    purpose: '突出核心卖点和转化理由',
-    guidance: '围绕功能、利益点、优势表达，可配轻量标题、图标、局部特写，但产品主体清晰'
+    defaultName: 'Feature Image',
+    purpose: 'Highlight one core selling point and build a purchase reason',
+    guidance: 'Focus on one strong benefit and keep the product dominant'
   },
   scenario: {
-    label: '场景图',
-    defaultName: '场景应用图',
-    purpose: '展示真实场景和使用效果',
-    guidance: '让产品自然融入真实环境，突出使用氛围、适配空间和代入感'
+    defaultName: 'Scenario Image',
+    purpose: 'Show realistic use context and improve understanding',
+    guidance: 'Use a believable environment and preserve real installation logic'
   },
   detail: {
-    label: '细节图',
-    defaultName: '细节特写图',
-    purpose: '放大展示材质、结构、做工与质感',
-    guidance: '强调纹理、连接结构、表面处理、灯光质感、防水耐用等真实细节'
+    defaultName: 'Detail Image',
+    purpose: 'Show material, structure, craftsmanship, or important close-up details',
+    guidance: 'Use close-ups to strengthen trust without changing the product'
   },
   dimensions: {
-    label: '尺寸图',
-    defaultName: '尺寸参数图',
-    purpose: '帮助买家快速理解大小和结构',
-    guidance: '清晰展示尺寸、容量、比例、参照物、安装位置或结构关系'
+    defaultName: 'Dimension Image',
+    purpose: 'Explain size, scale, and fit to reduce return risk',
+    guidance: 'Use clear measurements, scale reference, and simple annotation'
   },
   steps: {
-    label: '步骤图',
-    defaultName: '使用步骤图',
-    purpose: '说明使用方式、安装或操作流程',
-    guidance: '分步清晰，不要信息过载，优先让买家一眼看懂怎么用'
+    defaultName: 'Steps Image',
+    purpose: 'Explain installation or usage steps and reduce understanding cost',
+    guidance: 'Keep order clear and avoid overloading one image with too many steps'
   },
   comparison: {
-    label: '对比图',
-    defaultName: '对比说明图',
-    purpose: '强化产品优势',
-    guidance: '可做竞品对比、前后对比、效果对比，但不能虚构不存在的能力'
+    defaultName: 'Comparison Image',
+    purpose: 'Highlight differentiation or before-versus-after value',
+    guidance: 'Use truthful comparison and avoid unsupported superiority claims'
   },
   package: {
-    label: '包装图',
-    defaultName: '包装清单图',
-    purpose: '说明包装内容和套装信息',
-    guidance: '只展示已确认的包装、配件和套装内容，不要杜撰配件'
+    defaultName: 'Package Image',
+    purpose: 'Show box contents and included accessories clearly',
+    guidance: 'Only show confirmed included items'
   },
   summary: {
-    label: '总结图',
-    defaultName: '补充总结图',
-    purpose: '补充综合价值和收尾购买理由',
-    guidance: '可用于礼品属性、信任感、总结卖点、氛围收尾等强化表达'
+    defaultName: 'Summary Image',
+    purpose: 'Reinforce value, trust, or final buying reasons',
+    guidance: 'Work as a clean closing image that summarizes key value'
   }
+}
+
+async function createAgentCompletion(openai, requestOptions) {
+  const maxAttempts = 2
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await openai.chat.completions.create(requestOptions)
+    } catch (error) {
+      const shouldRetry = attempt < maxAttempts && isTransientUpstreamError(error)
+      console.error(
+        `Agent upstream request failed (${attempt}/${maxAttempts}):`,
+        error?.status || error?.response?.status || error?.code || 'unknown',
+        error?.message || error
+      )
+
+      if (!shouldRetry) throw error
+      await sleep(1200)
+    }
+  }
+
+  throw new Error('Agent request did not return a result after retrying')
 }
 
 function getDefaultSelectedImageTasks() {
@@ -109,154 +133,463 @@ function expandSelectedImageTasks(selectedImageTasks = []) {
   return expanded
 }
 
-function getMarketplaceLanguage(marketplace = 'UK') {
-  const languageMap = {
-    US: 'English',
-    UK: 'English',
-    CA: 'English',
-    AU: 'English',
-    DE: 'German',
-    FR: 'French',
-    IT: 'Italian',
-    ES: 'Spanish',
-    JP: 'Japanese',
-    NL: 'Dutch',
-    SE: 'Swedish',
-    PL: 'Polish'
-  }
-
-  return languageMap[marketplace] || 'English'
-}
-
 function getTargetImageLanguage({ marketplace = 'UK', imageLanguage } = {}) {
   return imageLanguage || getMarketplaceLanguage(marketplace)
 }
 
 function getFontStyleLabel(fontPreference = 'auto') {
   const fontMap = {
-    auto: '自动匹配字体风格',
-    'geometric-sans': '几何无衬线字体',
-    'bold-sans': '硬朗无衬线字体',
-    'elegant-serif': '优雅衬线字体',
-    'rounded-playful': '圆润亲和字体',
-    'handwritten-playful': '手写趣味字体'
+    auto: 'auto-matched font style',
+    'geometric-sans': 'geometric sans-serif',
+    'bold-sans': 'bold sans-serif',
+    'elegant-serif': 'elegant serif',
+    'rounded-playful': 'rounded playful font',
+    'handwritten-playful': 'playful handwritten font'
   }
 
-  return fontMap[fontPreference] || '自动匹配字体风格'
+  return fontMap[fontPreference] || 'auto-matched font style'
 }
 
 function getBrandColorLabel(brandColorMode, brandColor) {
   if (brandColorMode === 'manual' && brandColor) {
-    return `手动指定主色 ${brandColor}`
+    return `manual brand color ${brandColor}`
   }
 
-  return '智能主色（根据产品图片、材质和场景自动判断）'
+  return 'auto brand color'
 }
 
-function buildImageContentParts(referenceImages = []) {
-  return referenceImages
-    .slice(0, 3)
-    .map((imageUrl) => {
-      const imagePath = path.join(process.cwd(), imageUrl.replace('/uploads/', 'uploads/'))
+function trimForModel(value = '', maxLength = 1200) {
+  const text = String(value || '').trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
 
-      if (!fs.existsSync(imagePath)) {
-        return null
-      }
+function buildDedupedContext(values = []) {
+  const normalizedValues = []
+  const segments = []
 
-      const ext = path.extname(imagePath).toLowerCase()
-      const mimeType =
-        ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+  values.forEach((value) => {
+    const text = cleanContextSegment(value)
+    if (!text) return
 
-      return {
-        type: 'image_url',
-        image_url: {
-          url: `data:${mimeType};base64,${fs.readFileSync(imagePath).toString('base64')}`
-        }
+    const normalized = normalizeContextSegment(text)
+    const isCovered = normalizedValues.some((existing) => existing.includes(normalized))
+    if (isCovered) return
+
+    segments.push(text)
+    normalizedValues.push(normalized)
+  })
+
+  return segments.join(' ')
+}
+
+function cleanContextSegment(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function normalizeContextSegment(value = '') {
+  return cleanContextSegment(value).toLowerCase()
+}
+
+function buildProductSignals(sourceText = '') {
+  const text = String(sourceText || '').toLowerCase()
+
+  return {
+    archetype: inferArchetype(text),
+    hasFlexibleArm: /(gooseneck|flexible neck|flexible arm|adjustable arm)/.test(text),
+    hasCable: /(cable|wire|cord|usb)/.test(text),
+    hasController: /(controller|dimmer|timer|switch|remote)/.test(text),
+    hasBulb: /(bulb|uva|uvb|led|lamp head|light head)/.test(text),
+    hasInteriorTarget: /(tank|terrarium|aquarium|enclosure|inside)/.test(text)
+  }
+}
+
+async function buildImageContentParts(primaryReferenceImageUrl = '', referenceImages = []) {
+  const contentParts = []
+  const normalizedReferenceImages = Array.isArray(referenceImages) ? referenceImages.filter(Boolean) : []
+  const orderedReferenceImages = []
+
+  if (primaryReferenceImageUrl && normalizedReferenceImages.includes(primaryReferenceImageUrl)) {
+    orderedReferenceImages.push(primaryReferenceImageUrl)
+  }
+
+  normalizedReferenceImages.forEach((imageUrl) => {
+    if (imageUrl !== primaryReferenceImageUrl) {
+      orderedReferenceImages.push(imageUrl)
+    }
+  })
+
+  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 5).entries()) {
+    const imagePath = resolveUploadPathFromUrl(imageUrl)
+    if (!imagePath || !fs.existsSync(imagePath)) continue
+
+    contentParts.push({
+      type: 'text',
+      text:
+        index === 0 && primaryReferenceImageUrl
+          ? 'Reference image 1 is the explicit primary product image and the highest authority for product truth.'
+          : `Reference image ${index + 1} is a supporting product image and may only supplement understanding.`
+    })
+
+    const ext = path.extname(imagePath).toLowerCase()
+    const mimeType =
+      ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+    const fileBuffer = await readUploadFileBufferWithRetry(imagePath, {
+      attempts: 4,
+      delayMs: 220
+    })
+
+    contentParts.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${mimeType};base64,${fileBuffer.toString('base64')}`
       }
     })
-    .filter(Boolean)
+  }
+
+  return contentParts
 }
 
-function recommendStrategy(productName, category, sellingPoints) {
-  const name = String(productName || '').toLowerCase()
-  const cat = String(category || '').toLowerCase()
-  const points = String(sellingPoints || '').toLowerCase()
+function buildFallbackProductBlueprint({
+  productName,
+  category,
+  marketplace,
+  material,
+  sellingPoints,
+  additionalInfo,
+  referenceImages = [],
+  signals
+} = {}) {
+  const materialItems = String(material || '')
+    .split(/[\n,;|]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6)
 
-  if (
-    cat.includes('tech') ||
-    cat.includes('electronic') ||
-    cat.includes('数码') ||
-    cat.includes('电子') ||
-    name.includes('bluetooth') ||
-    name.includes('wireless') ||
-    name.includes('usb') ||
-    name.includes('charger')
-  ) {
-    return 'technical'
+  const context = [
+    productName,
+    category,
+    sellingPoints,
+    additionalInfo,
+    material
+  ].join(' ').toLowerCase()
+
+  const parts = []
+  if (/(lamp|light|head)/.test(context)) parts.push('lamp head')
+  if (signals?.hasFlexibleArm) parts.push('flexible arm')
+  if (signals?.archetype === 'Clamp Mounted Device') parts.push('clamp')
+  if (signals?.hasCable) parts.push('power cable')
+  if (signals?.hasController) parts.push('controller')
+  if (signals?.hasBulb) parts.push('light source')
+
+  const connections = []
+  if (parts.includes('lamp head') && parts.includes('flexible arm')) {
+    connections.push('lamp head connected to flexible arm')
+  }
+  if (parts.includes('flexible arm') && parts.includes('clamp')) {
+    connections.push('flexible arm connected to clamp')
+  }
+  if (parts.includes('controller') && parts.includes('power cable')) {
+    connections.push('controller connected by cable')
   }
 
-  if (
-    cat.includes('fashion') ||
-    cat.includes('cloth') ||
-    cat.includes('apparel') ||
-    cat.includes('服装') ||
-    cat.includes('鞋') ||
-    cat.includes('beauty') ||
-    name.includes('dress') ||
-    name.includes('shirt') ||
-    name.includes('shoe')
-  ) {
-    return 'fashion'
+  const mountTypeMap = {
+    'Clamp Mounted Device': 'Clamp Mount',
+    'Hanging Device': 'Hook or Hanging Mount',
+    'Adhesive Mounted Device': 'Adhesive Mount',
+    'Magnetic Mounted Device': 'Magnetic Mount',
+    'Wall Mounted Device': 'Wall Mount',
+    'Wearable Product': 'Wearable Placement',
+    'Handheld Product': 'Handheld Use',
+    'Standing Product': 'Freestanding Placement'
   }
 
-  if (
-    cat.includes('home') ||
-    cat.includes('kitchen') ||
-    cat.includes('garden') ||
-    cat.includes('家居') ||
-    cat.includes('厨房') ||
-    cat.includes('园艺') ||
-    name.includes('storage') ||
-    name.includes('organizer') ||
-    name.includes('container')
-  ) {
-    return 'lifestyle'
+  const mountType = mountTypeMap[signals?.archetype] || 'Freestanding Placement'
+  const supportSurface = []
+  const placement = []
+  const relationship = []
+  const allowed = []
+  const forbidden = []
+
+  if (signals?.archetype === 'Clamp Mounted Device') {
+    supportSurface.push('support edge')
+    placement.push('outside support surface')
+    relationship.push('clamp touches support edge')
+    allowed.push('clamp grips real support edge')
+    forbidden.push('floating clamp', 'clamp passing through support surface')
   }
 
-  if (
-    points.includes('luxury') ||
-    points.includes('premium') ||
-    points.includes('高端') ||
-    points.includes('礼品') ||
-    points.includes('gift')
-  ) {
-    return 'premium'
+  if (signals?.hasInteriorTarget) {
+    relationship.push('device stays outside enclosure while effect points toward interior')
   }
 
-  if (
-    points.includes('waterproof') ||
-    points.includes('battery') ||
-    points.includes('capacity') ||
-    points.includes('防水') ||
-    points.includes('电池') ||
-    points.includes('容量') ||
-    String(sellingPoints || '').split('\n').length >= 5
-  ) {
-    return 'infographic'
+  const behavior = {
+    motion: signals?.hasFlexibleArm ? ['adjustable angle'] : [],
+    adjustment: signals?.hasController ? ['timing or intensity adjustment'] : []
   }
 
-  if (
-    points.includes('fast') ||
-    points.includes('quick') ||
-    points.includes('powerful') ||
-    points.includes('strong') ||
-    points.includes('高效') ||
-    points.includes('强力')
-  ) {
-    return 'featureFocus'
+  return {
+    identity: {
+      productType: String(productName || '').trim() || 'Unknown product',
+      category: String(category || '').trim() || 'General',
+      market: `Amazon ${marketplace || 'UK'}`,
+      archetype: signals?.archetype || 'Standing Product'
+    },
+    appearance: {
+      primaryColor: [],
+      material: materialItems
+    },
+    structure: {
+      parts,
+      connections
+    },
+    mounting: {
+      mountType,
+      supportSurface,
+      placement,
+      connectionType: parts.includes('clamp') ? 'mechanical grip' : 'direct placement',
+      relationship,
+      allowed,
+      forbidden
+    },
+    usage: {
+      useMode: signals?.archetype === 'Standing Product' ? 'freestanding use' : 'mounted use',
+      supportObject: supportSurface,
+      contactPoint: signals?.archetype === 'Clamp Mounted Device' ? ['support edge held between both clamp jaws'] : [],
+      spatialRelationship: relationship,
+      effectDirection: signals?.hasInteriorTarget ? ['device remains outside while its functional effect points toward the enclosure interior'] : [],
+      requiredVisibleEvidence: signals?.archetype === 'Clamp Mounted Device'
+        ? ['both clamp jaws visibly contact opposite sides of one real support edge', 'mounting contact remains unobstructed and readable']
+        : [],
+      forbiddenSpatialRelations: forbidden
+    },
+    relationships: {
+      mustKeep: connections
+    },
+    behavior,
+    reference: {
+      primaryReference: 'Primary product image',
+      secondaryReference: referenceImages.length > 1 ? 'Supporting product images' : 'None',
+      styleReference: 'Competitor or design references',
+      rules: [
+        'Primary reference controls appearance, structure, and accessories.',
+        'Supporting references may supplement angle and detail only.',
+        'Style references may influence composition, lighting, and layout only.'
+      ]
+    },
+    confidence: {
+      appearance: 0.7,
+      structure: parts.length > 0 ? 0.8 : 0.55,
+      mounting: signals?.archetype === 'Standing Product' ? 0.55 : 0.78
+    }
+  }
+}
+
+function normalizeProductBlueprint(value, fallbackInput) {
+  const fallback = buildFallbackProductBlueprint(fallbackInput)
+  const candidate = value && typeof value === 'object' ? value : {}
+  const getSection = (key) => (candidate[key] && typeof candidate[key] === 'object' ? candidate[key] : {})
+
+  const identity = getSection('identity')
+  const appearance = getSection('appearance')
+  const structure = getSection('structure')
+  const mounting = getSection('mounting')
+  const usage = getSection('usage')
+  const relationships = getSection('relationships')
+  const behavior = getSection('behavior')
+  const reference = getSection('reference')
+  const confidence = getSection('confidence')
+
+  return {
+    identity: {
+      productType: String(identity.productType || fallback.identity.productType).trim(),
+      category: String(identity.category || fallback.identity.category).trim(),
+      market: String(identity.market || fallback.identity.market).trim(),
+      archetype: String(identity.archetype || fallback.identity.archetype).trim()
+    },
+    appearance: {
+      primaryColor: normalizeStringArray(appearance.primaryColor, 6),
+      material:
+        normalizeStringArray(appearance.material, 6).length > 0
+          ? normalizeStringArray(appearance.material, 6)
+          : fallback.appearance.material
+    },
+    structure: {
+      parts:
+        normalizeStringArray(structure.parts, 10).length > 0
+          ? normalizeStringArray(structure.parts, 10)
+          : fallback.structure.parts,
+      connections:
+        normalizeStringArray(structure.connections, 10).length > 0
+          ? normalizeStringArray(structure.connections, 10)
+          : fallback.structure.connections
+    },
+    mounting: {
+      mountType: String(mounting.mountType || fallback.mounting.mountType).trim(),
+      supportSurface:
+        normalizeStringArray(mounting.supportSurface, 8).length > 0
+          ? normalizeStringArray(mounting.supportSurface, 8)
+          : fallback.mounting.supportSurface,
+      placement:
+        normalizeStringArray(mounting.placement, 8).length > 0
+          ? normalizeStringArray(mounting.placement, 8)
+          : fallback.mounting.placement,
+      connectionType: String(mounting.connectionType || fallback.mounting.connectionType).trim(),
+      relationship:
+        normalizeStringArray(mounting.relationship, 10).length > 0
+          ? normalizeStringArray(mounting.relationship, 10)
+          : fallback.mounting.relationship,
+      allowed:
+        normalizeStringArray(mounting.allowed, 10).length > 0
+          ? normalizeStringArray(mounting.allowed, 10)
+          : fallback.mounting.allowed,
+      forbidden:
+        normalizeStringArray(mounting.forbidden, 10).length > 0
+          ? normalizeStringArray(mounting.forbidden, 10)
+          : fallback.mounting.forbidden
+    },
+    usage: {
+      useMode: String(usage.useMode || fallback.usage.useMode).trim(),
+      supportObject:
+        normalizeStringArray(usage.supportObject, 8).length > 0
+          ? normalizeStringArray(usage.supportObject, 8)
+          : fallback.usage.supportObject,
+      contactPoint:
+        normalizeStringArray(usage.contactPoint, 8).length > 0
+          ? normalizeStringArray(usage.contactPoint, 8)
+          : fallback.usage.contactPoint,
+      spatialRelationship:
+        normalizeStringArray(usage.spatialRelationship, 10).length > 0
+          ? normalizeStringArray(usage.spatialRelationship, 10)
+          : fallback.usage.spatialRelationship,
+      effectDirection:
+        normalizeStringArray(usage.effectDirection, 8).length > 0
+          ? normalizeStringArray(usage.effectDirection, 8)
+          : fallback.usage.effectDirection,
+      requiredVisibleEvidence:
+        normalizeStringArray(usage.requiredVisibleEvidence, 10).length > 0
+          ? normalizeStringArray(usage.requiredVisibleEvidence, 10)
+          : fallback.usage.requiredVisibleEvidence,
+      forbiddenSpatialRelations:
+        normalizeStringArray(usage.forbiddenSpatialRelations, 10).length > 0
+          ? normalizeStringArray(usage.forbiddenSpatialRelations, 10)
+          : fallback.usage.forbiddenSpatialRelations
+    },
+    relationships: {
+      mustKeep:
+        normalizeStringArray(relationships.mustKeep, 10).length > 0
+          ? normalizeStringArray(relationships.mustKeep, 10)
+          : fallback.relationships.mustKeep
+    },
+    behavior: {
+      motion:
+        normalizeStringArray(behavior.motion, 8).length > 0
+          ? normalizeStringArray(behavior.motion, 8)
+          : fallback.behavior.motion,
+      adjustment:
+        normalizeStringArray(behavior.adjustment, 8).length > 0
+          ? normalizeStringArray(behavior.adjustment, 8)
+          : fallback.behavior.adjustment
+    },
+    reference: {
+      primaryReference: String(reference.primaryReference || fallback.reference.primaryReference).trim(),
+      secondaryReference: String(reference.secondaryReference || fallback.reference.secondaryReference).trim(),
+      styleReference: String(reference.styleReference || fallback.reference.styleReference).trim(),
+      rules:
+        normalizeStringArray(reference.rules, 8).length > 0
+          ? normalizeStringArray(reference.rules, 8)
+          : fallback.reference.rules
+    },
+    confidence: {
+      appearance: normalizeConfidenceValue(confidence.appearance) ?? fallback.confidence.appearance,
+      structure: normalizeConfidenceValue(confidence.structure) ?? fallback.confidence.structure,
+      mounting: normalizeConfidenceValue(confidence.mounting) ?? fallback.confidence.mounting
+    }
+  }
+}
+
+function buildTaskConstraints(taskType, productBlueprint) {
+  const constraints = []
+  const archetype = productBlueprint.identity?.archetype || 'Standing Product'
+  const relationships = normalizeStringArray(productBlueprint.relationships?.mustKeep, 10)
+  const mountingRelationships = normalizeStringArray(productBlueprint.mounting?.relationship, 10)
+  const mountingAllowed = normalizeStringArray(productBlueprint.mounting?.allowed, 10)
+  const mountingForbidden = normalizeStringArray(productBlueprint.mounting?.forbidden, 10)
+  const usageRelationships = normalizeStringArray(productBlueprint.usage?.spatialRelationship, 10)
+  const usageEvidence = normalizeStringArray(productBlueprint.usage?.requiredVisibleEvidence, 10)
+  const forbiddenSpatialRelations = normalizeStringArray(productBlueprint.usage?.forbiddenSpatialRelations, 10)
+
+  if (taskType === 'main') {
+    constraints.push(
+      'Full product visible with no crop.',
+      'Centered composition.',
+      'Product body occupies about 80% to 90% of frame.',
+      'Minimal empty margin around the product.',
+      'Pure white background RGB 255,255,255.',
+      'No text, no decorative props, no watermark, no added logo.'
+    )
+  } else {
+    constraints.push(
+      'Keep appearance, proportions, material, and real structure consistent with primary reference.',
+      'Do not create impossible contact relationships.'
+    )
   }
 
-  return 'basic'
+  if (relationships.length > 0) {
+    constraints.push(...relationships)
+  }
+
+  if (archetype !== 'Standing Product' && mountingRelationships.length > 0) {
+    constraints.push(...mountingRelationships)
+  }
+
+  if (taskType === 'scenario' || taskType === 'steps' || taskType === 'dimensions') {
+    constraints.push(...mountingAllowed)
+    constraints.push(...mountingForbidden.map((item) => `Avoid ${item}`))
+    constraints.push(...usageRelationships)
+    constraints.push(...usageEvidence)
+    constraints.push(...forbiddenSpatialRelations.map((item) => `Avoid ${item}`))
+  }
+
+  if (taskType === 'dimensions') {
+    constraints.push('Each measurement label should appear once only.')
+  }
+
+  return [...new Set(constraints)].slice(0, 12)
+}
+
+function defaultGoal(taskType) {
+  switch (taskType) {
+    case 'main':
+      return 'Increase CTR'
+    case 'dimensions':
+      return 'Reduce Return Risk'
+    case 'scenario':
+    case 'steps':
+      return 'Reduce Understanding Cost'
+    case 'detail':
+      return 'Build Trust'
+    case 'summary':
+      return 'Highlight Differentiation'
+    default:
+      return 'Increase Conversion'
+  }
+}
+
+function defaultLayout(taskType) {
+  switch (taskType) {
+    case 'main':
+      return 'Center Product'
+    case 'scenario':
+      return 'Product First in Scene'
+    case 'detail':
+      return 'Tight Detail Crop'
+    case 'dimensions':
+      return 'Centered Product with Measurement Space'
+    case 'summary':
+      return 'Balanced Summary Layout'
+    default:
+      return 'Left Product Right Text'
+  }
 }
 
 router.post('/', async (req, res) => {
@@ -276,16 +609,19 @@ router.post('/', async (req, res) => {
       brandColorMode,
       brandColor,
       sellingPoints,
-      imageType,
       complexity,
       selectedImageTasks = [],
-      referenceImages = []
+      referenceImages = [],
+      primaryReferenceImageUrl = ''
     } = req.body
+
+    const explicitPrimaryReferenceImageUrl =
+      primaryReferenceImageUrl || (Array.isArray(referenceImages) ? referenceImages[0] : '')
 
     if (!productName || !sellingPoints) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: '产品名称和核心卖点是必填项。'
+        message: 'productName and sellingPoints are required'
       })
     }
 
@@ -293,133 +629,212 @@ router.post('/', async (req, res) => {
     if (requestedTasks.length === 0) {
       return res.status(400).json({
         error: 'Invalid tasks',
-        message: '请至少选择 1 张要生成的图片任务。'
+        message: 'Select at least one image task'
       })
     }
 
     if (requestedTasks.length > 12) {
       return res.status(400).json({
         error: 'Too many tasks',
-        message: '单次最多分析 12 张图片任务，请先缩减张数。'
+        message: 'At most 12 image tasks can be analyzed at once'
       })
     }
 
-    const recommendedStrategy = recommendStrategy(productName, category, sellingPoints)
-    const strategyKey = imageType || recommendedStrategy || 'basic'
-    const strategy = STRATEGY_LIBRARY[strategyKey] || STRATEGY_LIBRARY.basic
+    const fullContext = buildDedupedContext([
+      listingInfo,
+      additionalInfo,
+      designNotes,
+      productName,
+      category,
+      dimensions,
+      material,
+      sellingPoints
+    ])
 
+    const productSignals = buildProductSignals(fullContext)
     const marketplaceLanguage = getTargetImageLanguage({
       marketplace: marketplace || 'UK',
       imageLanguage
     })
     const fontStyleLabel = getFontStyleLabel(fontPreference)
     const brandColorLabel = getBrandColorLabel(brandColorMode, brandColor)
-    const imageContentParts = buildImageContentParts(referenceImages)
+
+    const imageContentParts = await buildImageContentParts(explicitPrimaryReferenceImageUrl, referenceImages)
+    const globalRules = buildGlobalRules({
+      marketplace: marketplace || 'UK',
+      imageLanguage: marketplaceLanguage,
+      fontPreference,
+      brandColorMode,
+      brandColor
+    })
 
     const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl =
       process.env.AGENT_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
     const model = process.env.AGENT_MODEL || 'gpt-4o-mini'
+    const timeoutMs = Number(process.env.AGENT_TIMEOUT_MS || 180000)
 
     if (!apiKey || apiKey === 'sk-your-api-key-here') {
       return res.status(500).json({
         error: 'Missing API Key',
-        message: '后端未配置 OPENAI_API_KEY。'
+        message: 'OPENAI_API_KEY is not configured'
       })
     }
 
     const taskFrameworkDescription = requestedTasks
-      .map((item, index) => {
-        return [
-          `图 ${index + 1} | ${item.name}`,
-          `任务类型：${item.taskType}`,
-          `目标：${item.purpose}`,
-          `要求：${item.guidance}`
-        ].join('\n')
-      })
+      .map((item, index) => [
+        `Image ${index + 1} | ${item.name}`,
+        `Task type: ${item.taskType}`,
+        `Purpose: ${item.purpose}`,
+        `Guidance: ${item.guidance}`
+      ].join('\n'))
       .join('\n\n')
-
-    const hiddenStrategyDescription = [
-      `内部视觉策略：${strategy.name}`,
-      `策略特点：${Array.isArray(strategy.features) ? strategy.features.join('、') : '无'}`,
-      strategy.visualStyle?.mood ? `画面气质：${strategy.visualStyle.mood}` : '',
-      strategy.visualStyle?.background ? `背景倾向：${strategy.visualStyle.background}` : ''
-    ]
-      .filter(Boolean)
-      .join('\n')
 
     const openai = new OpenAI({
       apiKey,
-      baseURL: baseUrl
+      baseURL: baseUrl,
+      timeout: timeoutMs,
+      maxRetries: 0
+    })
+
+    console.info('[agent-analyze] upstream config', {
+      model,
+      baseUrl,
+      timeoutMs,
+      requestedTaskCount: requestedTasks.length,
+      referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0
     })
 
     const systemPrompt = `
-你是一名专业的亚马逊产品套图策略师。
-你的任务是根据产品信息、参考图、图片任务清单、销售地区、语言和视觉偏好，输出完整的图片策略方案。
+You are a senior Amazon listing image strategist.
 
-输出规则：
-1. 只返回 JSON，对象顶层必须包含 imagePlans 数组。
-2. imagePlans 必须严格包含 ${requestedTasks.length} 项，且 id 为 1 到 ${requestedTasks.length}。
-3. 必须严格按照“图片任务清单”的顺序输出，不能擅自补主图、删尺寸图，或把卖点图改成别的类型。
-4. 每项必须包含：id、name、type、purpose、prompt、mappedSellingPoints。
-5. prompt 必须是中文可读、方便运营修改的视觉策略说明，不要直接输出英文长 prompt。
-6. 如果图片任务里包含主图，主图必须符合亚马逊主图规范：纯白背景、完整展示产品、不裁切主体、无文字、无 logo、无水印、无无关道具。
-7. 参考图是产品一致性的最高依据。必须尽量保持产品外形、轮廓、颜色、材质、结构、比例、纹理、配件和关键细节一致，不要擅自改产品本体。
-8. 如果用户补充信息或自定义设置中明确要求某个场景、禁用项、语言、氛围或版式，优先服从，不要被默认模板覆盖。
-9. 销售国家、生成图片语言、品牌主色、字体风格都要体现在方案建议里。
-10. 如果品牌主色是手动指定，就把它作为标题、角标、图标或重点信息的强调色；如果是智能主色，就明确说明配色应根据产品和场景自适应。
-11. 如果字体风格是手动指定，就在方案里保持一致；如果是自动匹配，就让字体风格跟随产品类型和站点语言自动判断。
-12. 不要虚构不存在的功能、配件、认证、包装或竞品优势。
-13. 如果某张图更适合少字、无字、信息图、对比图、步骤图、氛围图，请直接在 prompt 里写明。
+Architecture:
+1. Global Rules are fixed engine rules.
+2. Product Blueprint describes the product itself.
+3. Visual Blueprint is code-defined and must NOT be invented by you.
+4. Image Strategy is per-image planning.
+
+Return JSON only.
+The top-level object must contain:
+- productBlueprint
+- imagePlans
+
+productBlueprint must include:
+- identity
+- appearance
+- structure
+- mounting
+- usage
+- relationships
+- behavior
+- reference
+- confidence
+
+identity must include:
+- productType
+- category
+- market
+- archetype
+
+mounting should focus on product attributes:
+- mountType
+- supportSurface
+- placement
+- connectionType
+- relationship
+- allowed
+- forbidden
+
+usage must explain how the real product is physically used in a scene:
+- useMode
+- supportObject
+- contactPoint
+- spatialRelationship
+- effectDirection
+- requiredVisibleEvidence
+- forbiddenSpatialRelations
+
+imagePlans must contain exactly ${requestedTasks.length} items in the same order as the selected image task list.
+
+Each image plan must include:
+- id
+- name
+- type
+- goal
+- focus
+- layout
+- constraints
+- successCriteria
+- failureCriteria
+- copy
+- promptHint
+
+Rules:
+1. Build productBlueprint first from the product itself.
+2. Do not generate visualBlueprint. That layer is handled by code templates.
+3. Do not write long prompts. promptHint must stay concise, editable, and Chinese.
+4. constraints must be short, hard, and non-negotiable for that image.
+5. copy must be a short Chinese text array, not paragraphs.
+6. Use reference priority correctly: product references control structure, style references control only composition and mood.
+7. Avoid SKU-specific hardcoded environmental assumptions unless clearly supported by product data and references.
+8. Prefer general mounting relationships such as support edge, outer surface, hanging point, flush attachment, or freestanding placement.
+9. Main image must obey Amazon hero-image rules.
+10. Inspect the primary image before planning. Extract visible parts, connections, contact geometry, orientation, and operating direction from the references and product information.
+11. The primary image is the highest authority for appearance and structure. Supporting images only clarify unseen angles, details, or usage; they must never redefine the product.
+12. For mounted products, describe a valid contact relationship: what touches what, which side each object occupies, how the product is supported, and what visible evidence proves the mounting is physically possible.
+13. Never invent SKU-specific mounting facts. If the references and product information do not establish a relationship, keep it generic and lower mounting confidence.
+14. For scenario and steps images, successCriteria must describe visible proof that the use or installation is physically correct. failureCriteria must describe visible results that make the image unusable.
+15. Do not repeat generic product descriptions inside successCriteria or failureCriteria. Use short, visually verifiable statements.
 `.trim()
 
     const userPrompt = `
-【产品信息】
-- 产品名称：${productName}
-- 完整 Listing 信息：${listingInfo || '未提供'}
-- 类目：${category || '未提供'}
-- 销售国家/地区：${marketplace || 'UK'}
-- 生成图片语言：${marketplaceLanguage}
-- 字体风格：${fontStyleLabel}
-- 品牌主色：${brandColorLabel}
-- 尺寸规格：${dimensions || '未提供'}
-- 材质：${material || '未提供'}
-- 目标受众：${targetAudience || '未提供'}
-- 补充信息：${additionalInfo || '无'}
-- 自定义设置：${designNotes || '无'}
-- 复杂度：${complexity || 'L2'}
+Product Input
+- Product Name: ${trimForModel(productName, 300)}
+- Category: ${trimForModel(category || 'Not provided', 300)}
+- Marketplace: ${marketplace || 'UK'}
+- Image Language: ${marketplaceLanguage}
+- Font Preference: ${fontStyleLabel}
+- Brand Color Preference: ${brandColorLabel}
+- Dimensions: ${trimForModel(dimensions || 'Not provided', 500)}
+- Material: ${trimForModel(material || 'Not provided', 500)}
+- Target Audience: ${trimForModel(targetAudience || 'Not provided', 500)}
+- Additional Info: ${trimForModel(additionalInfo || 'None', 1200)}
+- Custom Design Notes: ${trimForModel(designNotes || 'None', 600)}
+- Complexity: ${complexity || 'L1'}
 
-【核心卖点与 Listing 信息】
-${sellingPoints}
+Selling Points
+${trimForModel(sellingPoints, 1200)}
 
-【当前图片任务清单】
+Task List
 ${taskFrameworkDescription}
 
-【内部视觉策略（隐藏逻辑，仅供你参考，不要机械套模板）】
-${hiddenStrategyDescription}
+Global Rules
+${JSON.stringify(globalRules, null, 2)}
 
-【输出补充要求】
-- mappedSellingPoints 里放当前图片承接的主要卖点句子数组。
-- prompt 要直接写清楚画面重点、构图方式、文字密度、文案语言、产品展示方式，以及是否需要图标、尺寸线、对比结构。
-- 如果参考图展示了产品颜色、造型或结构特征，所有图片方案都必须尽量保持一致。
-- 如果某张图不适合放文字，也请直接写明少字或无字。
+Known Product Signals
+${JSON.stringify(productSignals, null, 2)}
+
+Planning Guidance
+- Product Blueprint should describe the product itself, not generic engine rules.
+- Mounting should describe support surfaces, placement, and relationships in reusable terms.
+- Image Strategy should say why each image exists and what must not go wrong.
+- Keep outputs concise and execution-ready.
 `.trim()
 
-    const completion = await openai.chat.completions.create({
+    const completion = await createAgentCompletion(openai, {
       model,
       messages: [
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content:
-            imageContentParts.length > 0
-              ? [{ type: 'text', text: userPrompt }, ...imageContentParts]
-              : userPrompt
+          content: imageContentParts.length > 0
+            ? [{ type: 'text', text: userPrompt }, ...imageContentParts]
+            : userPrompt
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 5000
+      temperature: 0.2,
+      max_tokens: 4200
     })
 
     let rawContent = completion.choices[0].message.content || ''
@@ -434,41 +849,74 @@ ${hiddenStrategyDescription}
     const result = JSON.parse(rawContent)
 
     if (!Array.isArray(result.imagePlans) || result.imagePlans.length !== requestedTasks.length) {
-      throw new Error(`Agent 返回的图片策略格式不正确，必须严格输出 ${requestedTasks.length} 张图。`)
+      throw new Error(`Agent must return exactly ${requestedTasks.length} image plans`)
     }
+
+    const productBlueprint = normalizeProductBlueprint(result.productBlueprint, {
+      productName,
+      category,
+      marketplace,
+      material,
+      sellingPoints,
+      additionalInfo,
+      referenceImages,
+      signals: productSignals
+    })
 
     result.imagePlans = result.imagePlans.map((plan, index) => {
       const requestedTask = requestedTasks[index]
+      const normalizedConstraints =
+        normalizeStringArray(plan.constraints, 12).length > 0
+          ? normalizeStringArray(plan.constraints, 12)
+          : buildTaskConstraints(requestedTask.taskType, productBlueprint)
+
+      const normalizedFocus = String(
+        plan.focus || (requestedTask.taskType === 'main' ? '完整产品主体' : '当前图片核心卖点')
+      ).trim()
+      const promptHint = String(plan.promptHint || plan.prompt || '').trim()
 
       return {
         id: index + 1,
-        name: plan.name || requestedTask.name,
-        type: plan.type || requestedTask.taskType,
+        name: String(plan.name || requestedTask.name).trim(),
+        type: String(plan.type || requestedTask.taskType).trim(),
         taskType: requestedTask.taskType,
         taskKey: requestedTask.taskKey,
-        purpose: plan.purpose || requestedTask.purpose,
-        prompt: plan.prompt || '',
-        mappedSellingPoints: Array.isArray(plan.mappedSellingPoints) ? plan.mappedSellingPoints : [],
-        promptEn: plan.promptEn || plan.englishPrompt || '',
+        purpose: String(plan.purpose || requestedTask.purpose).trim(),
+        goal: String(plan.goal || defaultGoal(requestedTask.taskType)).trim(),
+        layout: String(plan.layout || defaultLayout(requestedTask.taskType)).trim(),
+        focus: normalizedFocus,
+        visualFocus: normalizedFocus,
+        textDensity: String(plan.textDensity || '').trim(),
+        style: String(plan.style || '').trim(),
+        visualKeywords: normalizeStringArray(plan.visualKeywords, 8),
+        constraints: normalizedConstraints,
+        hardConstraints: normalizedConstraints,
+        successCriteria: normalizeStringArray(plan.successCriteria, 8),
+        failureCriteria: normalizeStringArray(plan.failureCriteria, 8),
+        copy: normalizeStringArray(plan.copy, 6),
+        promptHint,
+        prompt: promptHint,
+        visualBlueprint: normalizeVisualBlueprint({}, requestedTask.taskType),
+        promptEn: String(plan.promptEn || plan.englishPrompt || '').trim(),
         promptDirty: false
       }
     })
 
-    result._meta = {
-      strategyUsed: strategyKey,
-      strategyName: strategy.name,
-      recommendedStrategy: recommendedStrategy !== strategyKey ? recommendedStrategy : null,
-      complexity: complexity || 'L2',
-      requestedImageCount: requestedTasks.length,
-      generatedAt: new Date().toISOString()
+    const responseData = {
+      globalRules,
+      globalConstraints: globalRules,
+      productBlueprint,
+      imagePlans: result.imagePlans,
+      _meta: {
+        complexity: complexity || 'L1',
+        requestedImageCount: requestedTasks.length,
+        generatedAt: new Date().toISOString()
+      }
     }
 
     res.json({
       success: true,
-      data: {
-        imagePlans: result.imagePlans,
-        _meta: result._meta
-      },
+      data: responseData,
       usage: completion.usage
     })
   } catch (error) {

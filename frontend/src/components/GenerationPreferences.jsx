@@ -341,6 +341,8 @@ export default function GenerationPreferences({ listing, onChange }) {
 
     try {
       setEyedropperPicking(true)
+      setColorPopoverOpen(false)
+      await new Promise((resolve) => window.setTimeout(resolve, 40))
       const eyeDropper = new window.EyeDropper()
       const result = await eyeDropper.open()
 
@@ -362,10 +364,6 @@ export default function GenerationPreferences({ listing, onChange }) {
         <h3>生成偏好设置</h3>
         <span className="section-number">智能可调</span>
       </div>
-      <p className="section-description">
-        这里控制销售国家、图片语言、品牌主色、字体风格和自定义视觉要求。这些参数会同时参与 AI
-        策略分析和最终生图。
-      </p>
 
       <div className="preferences-block">
         <div className="form-group brand-color-popover-wrap">
@@ -473,9 +471,6 @@ export default function GenerationPreferences({ listing, onChange }) {
             )}
           </div>
 
-          <span className="help-text">
-            不手动指定时，AI 会根据产品本身颜色、材质和场景自动判断主色。
-          </span>
         </div>
 
         <div className="form-group" ref={fontMenuRef}>
@@ -519,9 +514,6 @@ export default function GenerationPreferences({ listing, onChange }) {
             </div>
           )}
 
-          <span className="help-text">
-            选择“智能字体风格”时，AI 会根据产品类型、文案语言和图片策略自动匹配更合适的字体气质。
-          </span>
         </div>
 
         <div className="preferences-grid">
@@ -555,9 +547,6 @@ export default function GenerationPreferences({ listing, onChange }) {
                 </option>
               ))}
             </select>
-            <span className="help-text">
-              默认跟随销售国家，也可以手动覆盖。图片上的标题、标签和说明文案会优先使用这里的语言。
-            </span>
           </div>
         </div>
 
@@ -571,15 +560,8 @@ export default function GenerationPreferences({ listing, onChange }) {
             maxLength={500}
           />
           <div className="preferences-footer">
-            <span className="help-text">
-              例如：高级感、自然光、简洁信息图、不做夸张特效、不要人物、避免过深背景等。
-            </span>
             <span className="char-count">{(listing.designNotes || '').length}/500</span>
           </div>
-        </div>
-
-        <div className="preference-tip-card">
-          AI 分析时会综合产品图片、Listing 信息、补充信息、站点语言、品牌主色和字体风格，再输出更贴近运营目标的出图方案。
         </div>
       </div>
     </div>

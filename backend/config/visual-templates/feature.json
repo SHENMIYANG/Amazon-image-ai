@@ -1,0 +1,23 @@
+{
+  "camera": "Front or three-quarter product view",
+  "composition": "Left product right text",
+  "crop": "Product occupies about 55% to 65% of frame",
+  "lighting": "Clean commercial lighting",
+  "background": "Simple infographic background",
+  "text": "Short supporting copy allowed",
+  "safeArea": {
+    "top": "10%",
+    "bottom": "10%",
+    "left": "8%",
+    "right": "10%"
+  },
+  "typographyRules": [
+    "Keep headline concise.",
+    "Do not let text dominate the product."
+  ],
+  "negativeRules": [
+    "Do not overload one image with too many selling points.",
+    "Do not block the product body."
+  ],
+  "style": "Amazon feature infographic"
+}

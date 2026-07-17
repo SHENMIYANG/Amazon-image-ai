@@ -30,7 +30,7 @@
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
-  padding: 0.58rem 0.7rem;
+  padding: 0.5rem 0.62rem;
   cursor: pointer;
   transition: all 0.2s ease;
   text-align: left;
@@ -51,10 +51,10 @@
 .brand-color-card-icon,
 .font-select-icon,
 .font-option-icon {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 9px;
   border: 1px solid rgba(17, 24, 39, 0.06);
 }
 
@@ -98,7 +98,7 @@
 .font-select-copy strong,
 .font-option-copy strong {
   color: #111827;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 700;
   line-height: 1.18;
 }
@@ -107,8 +107,8 @@
 .font-select-copy small,
 .font-option-copy small {
   color: #8a8fa3;
-  font-size: 0.8rem;
-  line-height: 1.25;
+  font-size: 0.72rem;
+  line-height: 1.18;
 }
 
 .brand-color-card-action,
@@ -133,10 +133,10 @@
   top: 50%;
   left: calc(100% + 18px);
   z-index: 30;
-  width: 392px;
-  padding: 0.72rem;
+  width: 320px;
+  padding: 0.58rem;
   border: 1px solid #ececf3;
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfbfd 100%);
   box-shadow: 0 24px 60px rgba(17, 24, 39, 0.18);
   transform: translateY(-50%);
@@ -158,8 +158,8 @@
 .brand-color-square {
   position: relative;
   width: 100%;
-  height: 156px;
-  border-radius: 12px;
+  height: 126px;
+  border-radius: 10px;
   cursor: crosshair;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08);
@@ -167,8 +167,8 @@
 
 .brand-color-square-thumb {
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.25), 0 2px 8px rgba(17, 24, 39, 0.25);
@@ -178,17 +178,17 @@
 
 .brand-color-slider-row {
   display: grid;
-  grid-template-columns: 38px 1fr 38px;
-  gap: 0.55rem;
+  grid-template-columns: 32px 1fr 32px;
+  gap: 0.45rem;
   align-items: center;
-  margin-top: 0.55rem;
+  margin-top: 0.45rem;
 }
 
 .brand-color-slider-icon,
 .brand-color-slider-preview {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: 1px solid #dfe3eb;
   display: flex;
   align-items: center;
@@ -197,7 +197,7 @@
 }
 
 .brand-color-slider-icon {
-  font-size: 1rem;
+  font-size: 0.88rem;
   color: #6b7280;
 }
 
@@ -225,7 +225,7 @@
 
 .brand-color-hue-slider {
   width: 100%;
-  height: 12px;
+  height: 10px;
   border-radius: 999px;
   appearance: none;
   outline: none;
@@ -234,8 +234,8 @@
 
 .brand-color-hue-slider::-webkit-slider-thumb {
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: #fff;
   border: 3px solid #fff;
@@ -244,8 +244,8 @@
 }
 
 .brand-color-hue-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: #fff;
   border: 3px solid #fff;
@@ -256,14 +256,14 @@
 .brand-color-swatches {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.45rem;
-  margin-top: 0.55rem;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
 }
 
 .brand-color-swatch {
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: 7px;
   border: 2px solid transparent;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08);
@@ -276,32 +276,32 @@
 
 .brand-color-hex-row {
   display: grid;
-  grid-template-columns: 58px 1fr;
-  gap: 0.6rem;
+  grid-template-columns: 44px 1fr;
+  gap: 0.5rem;
   align-items: center;
-  margin-top: 0.55rem;
+  margin-top: 0.45rem;
 }
 
 .brand-color-hex-label {
   color: #4b5563;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
 .brand-color-hex-row input {
-  height: 40px;
-  border-radius: 9px;
+  height: 34px;
+  border-radius: 8px;
   border: 1px solid #d8dce6;
   background: #fff;
-  padding: 0 0.85rem;
-  font-size: 0.9rem;
+  padding: 0 0.7rem;
+  font-size: 0.84rem;
   font-weight: 600;
   color: #111827;
 }
 
 .font-select-card {
-  min-height: 64px;
-  padding: 0.58rem 0.7rem;
+  min-height: 56px;
+  padding: 0.5rem 0.62rem;
   border-radius: 12px;
 }
 
@@ -323,24 +323,24 @@
 .font-select-menu {
   margin-top: 0.45rem;
   border: 1px solid #ebe7f7;
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  padding: 0.4rem;
+  padding: 0.3rem;
   box-shadow: 0 18px 42px rgba(17, 24, 39, 0.1);
-  max-height: 420px;
+  max-height: 340px;
   overflow-y: auto;
 }
 
 .font-option {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.65rem;
   width: 100%;
   border: none;
   background: transparent;
-  min-height: 82px;
-  padding: 0.62rem 0.72rem;
-  border-radius: 15px;
+  min-height: 64px;
+  padding: 0.5rem 0.56rem;
+  border-radius: 12px;
   cursor: pointer;
   text-align: left;
   transition: background 0.18s ease;
@@ -355,11 +355,11 @@
 }
 
 .font-option-copy strong {
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 .font-option-copy small {
-  font-size: 0.9rem;
+  font-size: 0.76rem;
 }
 
 .font-option-copy {
@@ -379,13 +379,13 @@
   background: #faf5ff;
   color: #5b21b6;
   padding: 0.9rem 1rem;
-  font-size: 0.84rem;
-  line-height: 1.55;
+  font-size: 0.74rem;
+  line-height: 1.42;
 }
 
 .char-count {
   color: #9ca3af;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 

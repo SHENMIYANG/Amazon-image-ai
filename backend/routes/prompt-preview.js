@@ -7,10 +7,10 @@ router.post('/', async (req, res) => {
   try {
     const { listing, plan, resolution } = req.body || {}
 
-    if (!listing || !plan?.prompt) {
+    if (!listing || (!plan?.prompt && !plan?.promptHint)) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: 'listing and plan.prompt are required'
+        message: 'listing and plan.prompt or plan.promptHint are required'
       })
     }
 
@@ -19,15 +19,16 @@ router.post('/', async (req, res) => {
     const executionPromptEn = buildAmazonPrompt(
       listing,
       normalizedPlan,
-      listing._meta?.strategyUsed || listing.imageType || 'basic',
-      listing.complexity || 'L2',
-      resolution || '2048x2048'
+      listing.complexity || 'L1',
+      resolution || '2048x2048',
+      listing.primaryReferenceImageUrl || ''
     )
 
     res.json({
       success: true,
       data: {
         promptZh: normalizedPlan.originalPrompt || plan.prompt || '',
+        promptHint: plan.promptHint || '',
         promptEn,
         executionPromptEn
       }

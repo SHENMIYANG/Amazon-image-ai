@@ -1,0 +1,22 @@
+{
+  "camera": "Commercial product angle",
+  "composition": "Balanced product and summary area",
+  "crop": "Readable product framing",
+  "lighting": "Clean commercial lighting",
+  "background": "Simple e-commerce background",
+  "text": "Short summary copy allowed",
+  "safeArea": {
+    "top": "10%",
+    "bottom": "10%",
+    "left": "8%",
+    "right": "8%"
+  },
+  "typographyRules": [
+    "Keep summary copy light and easy to scan."
+  ],
+  "negativeRules": [
+    "Do not repeat all previous selling points.",
+    "Do not turn the summary image into a dense feature sheet."
+  ],
+  "style": "Closing summary layout"
+}

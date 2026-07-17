@@ -9,7 +9,7 @@ export const IMAGE_TASK_OPTIONS = [
   {
     type: 'feature',
     label: '卖点图',
-    description: '突出核心卖点、功能利益点',
+    description: '突出核心卖点、功能和利益点',
     defaultCount: 2,
     defaultName: '核心卖点图'
   },
@@ -76,19 +76,26 @@ const TASK_BLUEPRINTS = {
   summary: '用于补充礼品属性、信任感、多场景总结或综合购买理由。'
 }
 
+export const MAIN_IMAGE_FIXED_RULE = `【目的】提升点击率（CTR）
+【构图】产品完整展示，主体占画面约 85%，居中摆放。
+【背景】纯白背景（RGB 255,255,255）。
+【文字】无文字。
+【Logo】无 Logo（除产品本身自带品牌）。
+【元素】除产品及产品标配配件外，不添加任何装饰元素。
+【要求】突出产品主体，边缘清晰，光线自然，阴影真实，符合 Amazon 主图规范。`
+
 const TASK_PLACEHOLDERS = {
   main: [
-    '【画面目标】白底主图，产品完整居中，保留真实颜色、材质和结构',
-    '【必须满足】无文字、无 Logo、无水印、无多余道具、不要裁切产品',
-    '【可补充】如果有随货配件，只展示确认会一起发货的内容'
+    MAIN_IMAGE_FIXED_RULE,
+    '【补充示例】希望略带真实落地阴影；标配配件与产品一起整齐展示；不要裁切产品任何边缘。'
   ],
   feature: [
-    '【核心卖点】填写这张图最想突出的一条卖点',
+    '【核心卖点】填写这张图最想突出的 1 条卖点',
     '【画面方式】局部特写 / 放大结构 / 图标标注 / 功能演示',
     '【避免】不要一张图塞太多卖点，避免背景和文案抢主体'
   ],
   scenario: [
-    '【使用场景】填写真实使用环境，例如庭院、厨房、卧室、车内、露台',
+    '【使用场景】填写真实使用环境，例如花园、厨房、卧室、车内、露台',
     '【画面重点】产品自然融入场景，突出使用氛围和体验感',
     '【避免】场景过假、人物抢主体、产品比例失真'
   ],
@@ -197,9 +204,24 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       type: task.taskType,
       purpose: task.description,
       blueprint: task.blueprint,
-      prompt: hasPromptValue ? existing.prompt : '',
+      goal: existing?.goal || '',
+      layout: existing?.layout || '',
+      focus: existing?.focus || '',
+      visualFocus: existing?.visualFocus || '',
+      textDensity: existing?.textDensity || '',
+      style: existing?.style || '',
+      visualKeywords: existing?.visualKeywords || [],
+      constraints: existing?.constraints || [],
+      hardConstraints: existing?.hardConstraints || [],
+      successCriteria: existing?.successCriteria || [],
+      failureCriteria: existing?.failureCriteria || [],
+      copy: existing?.copy || [],
+      visualBlueprint: existing?.visualBlueprint || null,
+      promptHint: existing?.promptHint || '',
+      prompt: hasPromptValue ? existing.prompt : task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : '',
       placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
       promptEn: existing?.promptEn || '',
+      executionPrompt: existing?.executionPrompt || '',
       executionPromptEn: existing?.executionPromptEn || '',
       promptDirty: existing?.promptDirty || false
     }
