@@ -85,28 +85,9 @@ npm ci
 
 #### 5. 启动项目
 
-**方式 A - 快速启动（依赖已安装时）**
-
-如果你已经安装过依赖，直接双击启动：
-
 **Windows 用户**：
 ```bash
-# 双击运行
-start.bat
-```
-
-**macOS / Linux 用户**：
-```bash
-./start.sh
-```
-
-**方式 B - 完整启动（首次使用或分发给他人的）**
-
-自动检查 Node.js、安装依赖、启动服务：
-
-**Windows 用户**：
-```bash
-# 双击运行
+# 双击运行（自动检查环境 + 安装依赖 + 启动）
 start-amazon-image-studio.bat
 ```
 
@@ -122,7 +103,6 @@ npm run dev
 ```
 
 >  **提示**：
-> - `start.bat` / `start.sh` - 快速启动（依赖已安装）
 > - `start-amazon-image-studio.bat` / `start-amazon-image-studio.sh` - 完整启动（自动检查环境 + 安装依赖）
 > - `stop-amazon-image-studio.bat` - 停止服务（关闭所有 Node 进程）
 
@@ -246,6 +226,38 @@ docker-compose down
 
 ---
 
+## ⚙️ API 配置说明
+
+本项目使用**两个独立的 API 配置**：
+
+| 用途 | 配置项 | 推荐服务商 | 免费额度 |
+|------|--------|------------|----------|
+| **图像生成** | `IMAGE_GEN_*` | claudex.me / OpenAI | - |
+| **Agent 文本分析** | `AGENT_*` | 智谱 AI / Gemini / Groq | 2000 万 Token / 1500 请求/天 |
+
+### 图像生成 API（必需）
+
+```env
+IMAGE_GEN_API_KEY=sk-your-api-key-here
+IMAGE_GEN_BASE_URL=https://claudex.me/v1
+IMAGE_GENERATION_MODEL=gpt-image-2
+```
+
+### Agent 文本分析 API（可选）
+
+用于 AI 智能分析产品、生成套图策略。不配置时，前端仍可手动填写图片策略。
+
+| 服务商 | 免费额度 | 推荐度 | 配置 |
+|--------|----------|--------|------|
+| **智谱 AI** | 2000 万 Token | ⭐⭐⭐⭐⭐ | `AGENT_BASE_URL=https://open.bigmodel.cn/api/paas/v4/` `AGENT_MODEL=glm-4-flash` |
+| **Google Gemini** | 1500 请求/天 | ⭐⭐⭐⭐ | `AGENT_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/` `AGENT_MODEL=gemini-2.0-flash` |
+| **Groq** | 14000 请求/天 | ⭐⭐⭐ | `AGENT_BASE_URL=https://api.groq.com/openai/v1` `AGENT_MODEL=llama-3.3-70b-versatile` |
+| **DeepSeek** | 新用户赠送 | ⭐⭐⭐⭐ | `AGENT_BASE_URL=https://api.deepseek.com/v1` `AGENT_MODEL=deepseek-chat` |
+
+> 💡 Agent 分析 Token 消耗：L1 ~1000-1500 / L2 ~1500-2500 / L3 ~2500-4000
+
+---
+
 ## 📁 项目结构
 
 ```
@@ -269,8 +281,15 @@ Amazon-image-ai/
 │   │   ├── generate.js       # 图片生成接口
 │   │   ├── agent-analyze.js  # AI 分析接口
 │   │   ├── upload.js         # 文件上传接口
-│   │   └── testApiKey.js     # API Key 测试接口
-│   ├── strategy-library.js   # 7 种营销策略库
+│   │   └── prompt-preview.js # 策略预览接口
+│   ├── utils/
+│   │   ├── productModel.js   # 产品模型工具
+│   │   ├── upstreamRetry.js  # 上游重试工具
+│   │   ├── uploads.js        # 上传工具
+│   │   └── visualBlueprints.js # 视觉蓝图
+│   ├── config/
+│   │   ├── globalRules.js    # 全局规则
+│   │   └── visual-templates/ # 视觉模板配置
 │   ├── server.js
 │   └── package.json
 ├── docs/                     # 文档
@@ -280,6 +299,7 @@ Amazon-image-ai/
 ├── .gitignore
 ├── package.json              # 根项目配置
 ├── start-amazon-image-studio.bat      # Windows 启动脚本
+├── start-amazon-image-studio.ps1      # Windows PowerShell 启动逻辑
 ├── start-amazon-image-studio.sh       # macOS/Linux 启动脚本
 ├── stop-amazon-image-studio.bat       # Windows 停止脚本
 └── README.md

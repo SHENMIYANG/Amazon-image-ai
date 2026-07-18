@@ -8,6 +8,13 @@ frontend/dist/
 backend/uploads/
 backend/logs/
 backend/test-output/
+backend/public/templates/
+
+# Test & debug files
+backend/test-*.js
+backend/test-*.html
+backend/check-*.js
+backend/generate-template-examples.js
 
 # Environment variables (DO NOT commit API keys)
 .env
