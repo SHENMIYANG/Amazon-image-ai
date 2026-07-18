@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import './ProductImageUploader.css'
 
-const MAX_UPLOADS = 5
+const MAX_UPLOADS = 8
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const MIN_IMAGE_SIDE = 384
 const MAX_IMAGE_SIDE = 4096
@@ -310,7 +310,7 @@ export default function ProductImageUploader({
                   <p>建议上传多角度白底产品图，再少量补充实拍图。</p>
                   <ul>
                     <li>优先上传完整清晰的产品全貌图</li>
-                    <li>建议 1 张主图 + 2 到 4 张补充角度图</li>
+                    <li>建议 1 张主图 + 最多 7 张补充角度或细节图</li>
                     <li>竞品图或风格图不建议混入产品基准图</li>
                   </ul>
                 </div>

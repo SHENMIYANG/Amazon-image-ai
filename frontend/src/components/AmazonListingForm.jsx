@@ -46,17 +46,6 @@ function plansSignature(plans = []) {
       name: plan.name,
       prompt: plan.prompt,
       placeholder: plan.placeholder,
-      goal: plan.goal,
-      layout: plan.layout,
-      focus: plan.focus,
-      visualFocus: plan.visualFocus,
-      textDensity: plan.textDensity,
-      style: plan.style,
-      visualKeywords: plan.visualKeywords,
-      constraints: plan.constraints,
-      hardConstraints: plan.hardConstraints,
-      copy: plan.copy,
-      visualBlueprint: plan.visualBlueprint,
       promptHint: plan.promptHint,
       promptDirty: plan.promptDirty
     }))
@@ -81,27 +70,6 @@ function getAdditionalInfoPlaceholder() {
 【场景图要求】：希望展示花园、露台、夜间氛围
 【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`
 }
-
-const COMPLEXITY_LEVELS = [
-  {
-    value: 'L1',
-    label: 'L1 极速版',
-    icon: '1',
-    description: '更适合低价铺货和快速出图，一张图只讲一个重点。'
-  },
-  {
-    value: 'L2',
-    label: 'L2 标准版',
-    icon: '2',
-    description: '适合大多数 SKU，卖点、场景和信息完整度更均衡。'
-  },
-  {
-    value: 'L3',
-    label: 'L3 精品版',
-    icon: '3',
-    description: '适合重点款，层级、质感和视觉控制更强。'
-  }
-]
 
 export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
   const [expandedEditor, setExpandedEditor] = useState(null)
@@ -132,6 +100,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
         plan.id === imageId
           ? {
               ...plan,
+              strategyBody: prompt,
               promptHint: prompt,
               prompt,
               promptEn: '',
@@ -181,7 +150,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                   产品 Listing 信息 + 核心卖点 <span className="required">*</span>
                   <InlineHelpTip
                     width="300px"
-                    content="这里统一填写产品名称、卖点、规格、材质、受众、类目等关键信息，AI 会把它当作后续分析和生成的核心输入。"
+                    content="这里统一填写产品名称、卖点、规格、材质、受众、类目等关键信息，AI 会把它当作后续分析和生图的核心输入。"
                   />
                 </label>
               </div>
@@ -216,7 +185,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                   补充信息
                   <InlineHelpTip
                     width="300px"
-                    content="这里适合补充使用方式、场景要求、禁用元素、卖点顺序、排版偏好等，属于对主信息的定向补充。"
+                    content="这里适合补充使用方式、场景痛点、安装方案、禁用元素、卖点顺序、排版偏好等，AI 会尽量把这些内容吸收到具体策略里。"
                   />
                 </label>
               </div>
@@ -225,7 +194,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                   value={listing.additionalInfo || ''}
                   onChange={(event) => onChange('additionalInfo', event.target.value)}
                   placeholder={getAdditionalInfoPlaceholder()}
-                  rows={3}
+                  rows={4}
                 />
                 <button
                   type="button"
@@ -298,38 +267,36 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
             </div>
           </div>
 
-          <div className="strategy-complexity-block">
-            <div className="strategy-complexity-header">
-              <h4>出图复杂度</h4>
-            </div>
-
-            <div className="strategy-complexity-grid">
-              {COMPLEXITY_LEVELS.map((level) => (
-                <button
-                  key={level.value}
-                  type="button"
-                  className={`strategy-complexity-card ${listing.complexity === level.value ? 'active' : ''}`}
-                  onClick={() => onChange('complexity', level.value)}
-                >
-                  <span className="strategy-complexity-icon" aria-hidden="true">
-                    {level.icon}
-                  </span>
-                  <span className="strategy-complexity-copy">
-                    <strong>{level.label}</strong>
-                    <small>{level.description}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {analyzer && <div className="strategy-analyzer-slot">{analyzer}</div>}
+
+          {(listing.listingInfo || listing.additionalInfo) && (
+            <details className="strategy-source-context">
+              <summary>
+                <span>本次策划依据</span>
+                <small>核对 AI 是否吸收了原始产品信息、场景痛点、安装方案和使用步骤</small>
+              </summary>
+              <div className="strategy-source-context__body">
+                {listing.listingInfo ? (
+                  <section>
+                    <h5>产品 Listing 信息</h5>
+                    <pre>{listing.listingInfo}</pre>
+                  </section>
+                ) : null}
+                {listing.additionalInfo ? (
+                  <section>
+                    <h5>补充信息与业务要求</h5>
+                    <pre>{listing.additionalInfo}</pre>
+                  </section>
+                ) : null}
+              </div>
+            </details>
+          )}
 
           <div className="image-plans-container">
             <div className="image-plans-header">
               <h4>已规划 {imagePlans.length} 张图</h4>
               <p className="image-plans-review-note">
-                这里只给你看中文策略。你修改后会自动保存，真正点击开始生成时，系统才会在后台自动转换成英文执行稿再去生图。
+                这里只看中文策略正文。你修改后，点击生成图片时系统会直接按最新这版策略执行。
               </p>
             </div>
 
@@ -351,17 +318,14 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
                     </div>
 
                     <div className="image-plan-strategy-meta">
-                      <span className="image-plan-strategy-tag">中文策略</span>
-                      <span className="image-plan-strategy-status">
-                        {plan.promptDirty ? '已修改，生成时会自动同步英文执行稿' : '当前策略可直接用于生成'}
-                      </span>
+                      <span className="image-plan-strategy-tag">中文策略正文</span>
                     </div>
 
                     <textarea
                       value={plan.prompt || ''}
                       placeholder={plan.placeholder || ''}
                       onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
-                      rows={plan.taskType === 'main' ? 5 : 6}
+                      rows={plan.taskType === 'main' ? 6 : 8}
                     />
                   </div>
                 ))}

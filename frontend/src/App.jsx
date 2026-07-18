@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react'
 import AmazonListingForm from './components/AmazonListingForm'
+import ComplexitySelector from './components/ComplexitySelector'
 import ProductImageUploader from './components/ProductImageUploader'
 import TaskGrid from './components/TaskGrid'
 import GenerateButton from './components/GenerateButton'
@@ -22,13 +23,6 @@ import {
   MAIN_IMAGE_FIXED_RULE
 } from './utils/imageTasks'
 import './App.css'
-
-function mergeMainImageRule(prompt = '') {
-  const normalizedPrompt = String(prompt || '').trim()
-  if (!normalizedPrompt) return MAIN_IMAGE_FIXED_RULE
-  if (normalizedPrompt.includes('【目的】提升点击率（CTR）')) return normalizedPrompt
-  return `${MAIN_IMAGE_FIXED_RULE}\n${normalizedPrompt}`
-}
 
 function parseImageResolution(resolution) {
   if (resolution === '2k') return { width: 2048, height: 2048 }
@@ -93,6 +87,21 @@ function orderImagesByPrimary(images = [], primaryIndex = 0) {
 
 function getPrimaryReferenceImageUrl(images = []) {
   return Array.isArray(images) && images.length > 0 ? images[0] : ''
+}
+
+async function uploadReferenceFiles(files = [], label = '参考图上传接口') {
+  if (!Array.isArray(files) || files.length === 0) return []
+
+  const formData = new FormData()
+  files.forEach((file) => formData.append('images', file))
+  const response = await fetch('/api/upload', { method: 'POST', body: formData })
+  const data = await parseApiJson(response, label)
+
+  if (!data.success) {
+    throw new Error(data.message || '参考图上传失败')
+  }
+
+  return data.images.map((image) => image.url)
 }
 
 function buildImageVersionSnapshot(image = {}) {
@@ -162,7 +171,7 @@ function App() {
     brandColor: '',
     designNotes: '',
     additionalInfo: '',
-    complexity: 'L2',
+    complexity: 'L1',
     globalRules: null,
     globalConstraints: null,
     productBlueprint: null,
@@ -262,27 +271,22 @@ function App() {
 
   const handleAgentAnalyzeComplete = (analysisResult) => {
     const { imagePlans, _meta, globalRules, globalConstraints, productBlueprint } = analysisResult
-    const normalizedPlans = (imagePlans || []).map((plan) =>
-      plan?.taskType === 'main'
-        ? (() => {
-            const existingMainPrompt =
-              (listing.imagePlans || []).find((item) => item?.taskType === 'main')?.prompt || ''
-            const mergedPrompt = mergeMainImageRule(
-              existingMainPrompt || plan.promptHint || plan.prompt || MAIN_IMAGE_FIXED_RULE
-            )
-
-            return {
-              ...plan,
-              promptHint: mergedPrompt,
-              prompt: mergedPrompt
-            }
-          })()
-        : {
-            ...plan,
-            promptHint: plan.promptHint || plan.prompt || '',
-            prompt: plan.prompt || plan.promptHint || ''
-          }
-    )
+    const normalizedPlans = (imagePlans || []).map((plan) => ({
+      ...plan,
+      promptHint:
+        (plan.taskType || plan.type) === 'main'
+          ? MAIN_IMAGE_FIXED_RULE
+          : plan.promptHint || plan.prompt || '',
+      prompt:
+        (plan.taskType || plan.type) === 'main'
+          ? MAIN_IMAGE_FIXED_RULE
+          : plan.prompt || plan.promptHint || '',
+      strategyBody:
+        (plan.taskType || plan.type) === 'main'
+          ? MAIN_IMAGE_FIXED_RULE
+          : plan.strategyBody || plan.prompt || plan.promptHint || '',
+      promptDirty: false
+    }))
 
     setListing(prev => ({
       ...prev,
@@ -337,9 +341,13 @@ function App() {
         visualKeywords: plan.visualKeywords || [],
         constraints: plan.constraints || [],
         hardConstraints: plan.hardConstraints || [],
+        successCriteria: plan.successCriteria || [],
+        failureCriteria: plan.failureCriteria || [],
         copy: plan.copy || [],
+        allowTextOverlay: Boolean(plan.allowTextOverlay),
         visualBlueprint: plan.visualBlueprint || null,
         promptHint: plan.promptHint || '',
+        strategyBody: plan.strategyBody || plan.prompt || '',
         prompt: plan.prompt,
         promptEn: plan.promptEn || '',
         promptDirty: plan.promptDirty || false,
@@ -524,9 +532,13 @@ function App() {
       setCurrentTaskId(null)
     }
   }
-  const handleRegenerate = async (task, imageIndex, newPrompt) => {
+  const handleRegenerate = async (task, imageIndex, options = {}) => {
     const image = task.images[imageIndex]
     if (!image || image.status === 'generating') return
+
+    const requestedPrompt = String(options.prompt ?? image.prompt ?? '').trim()
+    const referenceFiles = Array.isArray(options.referenceFiles) ? options.referenceFiles.slice(0, 1) : []
+    const strategyChanged = requestedPrompt !== String(image.prompt || '').trim()
     
     const planToUse = {
       id: image.imageId,
@@ -542,12 +554,17 @@ function App() {
       visualKeywords: image.visualKeywords || [],
       constraints: image.constraints || [],
       hardConstraints: image.hardConstraints || [],
+      successCriteria: image.successCriteria || [],
+      failureCriteria: image.failureCriteria || [],
       copy: image.copy || [],
+      allowTextOverlay: Boolean(image.allowTextOverlay),
       visualBlueprint: image.visualBlueprint || null,
       promptHint: image.promptHint || '',
-      prompt: newPrompt || image.prompt,
-      promptEn: newPrompt ? '' : image.promptEn,
-      promptDirty: Boolean(newPrompt)
+      strategyBody: requestedPrompt,
+      prompt: requestedPrompt,
+      promptEn: strategyChanged ? '' : image.promptEn,
+      promptDirty: strategyChanged,
+      regenerationMode: true
     }
     
     if (!planToUse.prompt || planToUse.prompt.trim() === '') {
@@ -586,6 +603,14 @@ function App() {
       const taskListing = task.listing || buildListingPayload(listing, { includeGenerationSettings: true })
       const primaryReferenceImageUrl =
         task.primaryReferenceImageUrl || getPrimaryReferenceImageUrl(task.referenceImages || [])
+      const additionalReferenceImages = await uploadReferenceFiles(
+        referenceFiles,
+        `图${image.imageId}追加参考图上传接口`
+      )
+      const regenerationReferenceImages = [
+        ...(task.referenceImages || []),
+        ...additionalReferenceImages
+      ].filter((url, index, source) => url && source.indexOf(url) === index)
       const generateResponse = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -594,8 +619,9 @@ function App() {
             taskListing,
             planToUse,
             task.resolution || selectedResolution,
-            task.referenceImages || [],
-            primaryReferenceImageUrl
+            regenerationReferenceImages,
+            primaryReferenceImageUrl,
+            additionalReferenceImages
           )
         )
       })
@@ -623,10 +649,18 @@ function App() {
                     taskType: generatedImage.taskType || img.taskType,
                     error: null,
                     prompt: generatedImage.promptZh || img.prompt,
+                    strategyBody: generatedImage.promptZh || requestedPrompt,
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                     promptDirty: false,
                     versions: nextVersions,
                     regenerationError: null,
+                    lastRegeneration: {
+                      strategy: requestedPrompt,
+                      baseReferenceCount: (task.referenceImages || []).length,
+                      addedReferenceCount: additionalReferenceImages.length,
+                      usedReferenceCount: regenerationReferenceImages.length,
+                      generatedAt: new Date().toISOString()
+                    },
                     actualResolution: generatedImage.actualResolution || null,
                     requestedResolution: generatedImage.resolution || img.requestedResolution,
                     sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -638,7 +672,6 @@ function App() {
           }
           return t
         }))
-        alert(`图${image.imageId} 重新生成成功${newPrompt ? '（已使用新 prompt）' : ''}`)
       } else {
         throw new Error(generatedImage?.error || data.message || '生成失败')
       }
@@ -707,9 +740,13 @@ function App() {
         visualKeywords: img.visualKeywords || [],
         constraints: img.constraints || [],
         hardConstraints: img.hardConstraints || [],
+        successCriteria: img.successCriteria || [],
+        failureCriteria: img.failureCriteria || [],
         copy: img.copy || [],
+        allowTextOverlay: Boolean(img.allowTextOverlay),
         visualBlueprint: img.visualBlueprint || null,
         promptHint: img.promptHint || '',
+        strategyBody: img.strategyBody || img.prompt || '',
         prompt: img.prompt,
         promptEn: img.promptEn,
         promptDirty: img.promptDirty
@@ -970,6 +1007,13 @@ function App() {
                 <h2>开始生成</h2>
               </div>
               <div className="stack-panel-group action-panel-group">
+                <div className="sub-panel compact-sub-panel">
+                  <ComplexitySelector
+                    selected={listing.complexity}
+                    onChange={(value) => handleListingChange('complexity', value)}
+                  />
+                </div>
+
                 <div className="sub-panel compact-sub-panel">
                   <ResolutionSelector
                     selected={selectedResolution}

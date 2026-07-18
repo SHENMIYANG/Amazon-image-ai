@@ -185,7 +185,6 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     dimensions: listing.dimensions || parsedSections.dimensions,
     material: listing.material || parsedSections.material,
     targetAudience: listing.targetAudience || parsedSections.targetAudience,
-    complexity: listing.complexity || 'L2',
     selectedImageTasks,
     referenceImages,
     primaryReferenceImageUrl
@@ -212,13 +211,16 @@ export function buildPlanPayload(plan = {}) {
     successCriteria: plan.successCriteria,
     failureCriteria: plan.failureCriteria,
     copy: plan.copy,
+    allowTextOverlay: plan.allowTextOverlay,
     visualBlueprint: plan.visualBlueprint,
+    strategyBody: plan.strategyBody || plan.prompt,
     promptHint: plan.promptHint,
     prompt: plan.prompt,
     promptEn: plan.promptEn,
     executionPrompt: plan.executionPrompt,
     executionPromptEn: plan.executionPromptEn,
-    promptDirty: plan.promptDirty ? true : undefined
+    promptDirty: plan.promptDirty ? true : undefined,
+    regenerationMode: plan.regenerationMode ? true : undefined
   })
 }
 
@@ -227,9 +229,19 @@ export function buildGenerateRequest(
   plan = {},
   resolution,
   referenceImages = [],
-  primaryReferenceImageUrl = ''
+  primaryReferenceImageUrl = '',
+  regenerationReferenceImages = []
 ) {
   const complexity = sourceListing.complexity || 'L2'
+  const regenerationReferenceSet = new Set(regenerationReferenceImages)
+  const referenceImageRoles = referenceImages.map((url) => ({
+    url,
+    role: url === primaryReferenceImageUrl
+      ? 'primary_product'
+      : regenerationReferenceSet.has(url)
+        ? 'regeneration_reference'
+        : 'supporting_product'
+  }))
 
   return compactObject({
     listing: buildListingPayload(sourceListing, { stripAnalysisArtifacts: true }),
@@ -238,7 +250,7 @@ export function buildGenerateRequest(
     resolution,
     referenceImages,
     primaryReferenceImageUrl,
-    globalRules: sourceListing.globalRules || sourceListing.globalConstraints,
+    referenceImageRoles,
     productBlueprint: sourceListing.productBlueprint
   })
 }

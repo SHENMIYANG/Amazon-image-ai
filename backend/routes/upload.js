@@ -4,6 +4,7 @@ import path from 'path'
 import { ensureUploadsDir } from '../utils/uploads.js'
 
 const router = express.Router()
+const MAX_UPLOAD_FILES = 8
 
 // 配置 multer 存储
 const storage = multer.diskStorage({
@@ -33,13 +34,13 @@ const upload = multer({
   storage: storage,
   limits: {
     fileSize: 10 * 1024 * 1024,
-    files: 5
+    files: MAX_UPLOAD_FILES
   },
   fileFilter: fileFilter
 })
 
 // 上传接口
-router.post('/', upload.array('images', 5), (req, res) => {
+router.post('/', upload.array('images', MAX_UPLOAD_FILES), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -83,7 +84,7 @@ router.use((error, req, res, next) => {
     if (error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE') {
       return res.status(400).json({
         error: 'Too many files',
-        message: '最多上传 5 张产品图片'
+        message: `最多上传 ${MAX_UPLOAD_FILES} 张产品图片`
       })
     }
     return res.status(400).json({

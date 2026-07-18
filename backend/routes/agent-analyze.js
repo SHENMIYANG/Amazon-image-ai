@@ -2,7 +2,6 @@
 import fs from 'fs'
 import path from 'path'
 import OpenAI from 'openai'
-import { buildGlobalRules } from '../config/globalRules.js'
 import {
   getMarketplaceLanguage,
   inferArchetype,
@@ -16,6 +15,16 @@ import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../util
 const router = express.Router()
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const MAIN_IMAGE_STRATEGY_ZH = [
+  '【目的】提升点击率（CTR）。',
+  '【构图】产品完整展示，主体占画面约 85%，居中摆放。',
+  '【背景】纯白背景（RGB 255,255,255）。',
+  '【文字】无文字。',
+  '【Logo】无 Logo（除产品本身自带品牌）。',
+  '【元素】除产品及产品标配配件外，不添加任何装饰元素。',
+  '【要求】突出产品主体，边缘清晰，光线自然，阴影真实，符合 Amazon 主图规范。'
+].join('\n')
 
 const IMAGE_TASK_LIBRARY = {
   main: {
@@ -218,7 +227,7 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
     }
   })
 
-  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 5).entries()) {
+  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 8).entries()) {
     const imagePath = resolveUploadPathFromUrl(imageUrl)
     if (!imagePath || !fs.existsSync(imagePath)) continue
 
@@ -336,11 +345,13 @@ function buildFallbackProductBlueprint({
     },
     appearance: {
       primaryColor: [],
-      material: materialItems
+      material: materialItems,
+      distinctiveFeatures: []
     },
     structure: {
       parts,
-      connections
+      connections,
+      visibleEvidence: []
     },
     mounting: {
       mountType,
@@ -380,7 +391,8 @@ function buildFallbackProductBlueprint({
       appearance: 0.7,
       structure: parts.length > 0 ? 0.8 : 0.55,
       mounting: signals?.archetype === 'Standing Product' ? 0.55 : 0.78
-    }
+    },
+    uncertainties: []
   }
 }
 
@@ -411,7 +423,8 @@ function normalizeProductBlueprint(value, fallbackInput) {
       material:
         normalizeStringArray(appearance.material, 6).length > 0
           ? normalizeStringArray(appearance.material, 6)
-          : fallback.appearance.material
+          : fallback.appearance.material,
+      distinctiveFeatures: normalizeStringArray(appearance.distinctiveFeatures, 10)
     },
     structure: {
       parts:
@@ -421,7 +434,8 @@ function normalizeProductBlueprint(value, fallbackInput) {
       connections:
         normalizeStringArray(structure.connections, 10).length > 0
           ? normalizeStringArray(structure.connections, 10)
-          : fallback.structure.connections
+          : fallback.structure.connections,
+      visibleEvidence: normalizeStringArray(structure.visibleEvidence, 10)
     },
     mounting: {
       mountType: String(mounting.mountType || fallback.mounting.mountType).trim(),
@@ -503,7 +517,8 @@ function normalizeProductBlueprint(value, fallbackInput) {
       appearance: normalizeConfidenceValue(confidence.appearance) ?? fallback.confidence.appearance,
       structure: normalizeConfidenceValue(confidence.structure) ?? fallback.confidence.structure,
       mounting: normalizeConfidenceValue(confidence.mounting) ?? fallback.confidence.mounting
-    }
+    },
+    uncertainties: normalizeStringArray(candidate.uncertainties, 8)
   }
 }
 
@@ -555,6 +570,96 @@ function buildTaskConstraints(taskType, productBlueprint) {
   }
 
   return [...new Set(constraints)].slice(0, 12)
+}
+
+function parseCompletionJson(completion, label) {
+  let rawContent = completion?.choices?.[0]?.message?.content || ''
+  rawContent = rawContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+
+  const firstBrace = rawContent.indexOf('{')
+  const lastBrace = rawContent.lastIndexOf('}')
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    rawContent = rawContent.slice(firstBrace, lastBrace + 1)
+  }
+
+  if (!rawContent) {
+    throw new Error(`${label} did not return JSON`)
+  }
+
+  return JSON.parse(rawContent)
+}
+
+function getBlueprintQualityIssues(productBlueprint = {}) {
+  const issues = []
+  const parts = normalizeStringArray(productBlueprint.structure?.parts, 12)
+  const connections = normalizeStringArray(productBlueprint.structure?.connections, 12)
+  const colors = normalizeStringArray(productBlueprint.appearance?.primaryColor, 8)
+  const archetype = productBlueprint.identity?.archetype || 'Standing Product'
+
+  if (colors.length === 0) issues.push('primary product colors were not identified')
+  if (parts.length < 2) issues.push('visible product parts are incomplete')
+  if (parts.length >= 2 && connections.length === 0) issues.push('connections between visible parts are missing')
+
+  if (archetype !== 'Standing Product') {
+    if (normalizeStringArray(productBlueprint.usage?.contactPoint, 8).length === 0) {
+      issues.push('mounting contact points are missing')
+    }
+    if (normalizeStringArray(productBlueprint.usage?.requiredVisibleEvidence, 8).length === 0) {
+      issues.push('visible proof of correct use or mounting is missing')
+    }
+  }
+
+  return issues
+}
+
+function createFixedMainPlan(requestedTask, id) {
+  return {
+    id,
+    name: requestedTask.name,
+    type: 'main',
+    taskType: 'main',
+    taskKey: requestedTask.taskKey,
+    purpose: requestedTask.purpose,
+    goal: '提升 Amazon 搜索结果点击率，清晰展示完整产品',
+    layout: '方形纯白画布，完整产品居中，主体最长边约占画面 85%',
+    focus: '完整且真实的产品主体与已确认标配配件',
+    visualFocus: '完整且真实的产品主体与已确认标配配件',
+    textDensity: 'none',
+    style: 'Amazon 主图',
+    visualKeywords: [],
+    constraints: [
+      '完整产品不可裁切',
+      '主体最长边约占画面 85% 并居中',
+      '纯白背景 RGB 255,255,255',
+      '无文字、无装饰、无额外 Logo',
+      '不得新增或删除产品结构与配件'
+    ],
+    hardConstraints: [
+      '完整产品不可裁切',
+      '主体最长边约占画面 85% 并居中',
+      '纯白背景 RGB 255,255,255',
+      '无文字、无装饰、无额外 Logo',
+      '不得新增或删除产品结构与配件'
+    ],
+    successCriteria: [
+      '产品完整、居中且主体醒目',
+      '背景为纯白且边缘清晰',
+      '产品结构、颜色、比例和配件与主参考图一致'
+    ],
+    failureCriteria: [
+      '产品被裁切或主体明显偏小偏移',
+      '出现文字、装饰物、场景或未确认配件',
+      '产品外观或结构被改变'
+    ],
+    copy: [],
+    allowTextOverlay: false,
+    strategyBody: MAIN_IMAGE_STRATEGY_ZH,
+    promptHint: MAIN_IMAGE_STRATEGY_ZH,
+    prompt: MAIN_IMAGE_STRATEGY_ZH,
+    visualBlueprint: normalizeVisualBlueprint({}, 'main'),
+    promptEn: '',
+    promptDirty: false
+  }
 }
 
 function defaultGoal(taskType) {
@@ -609,7 +714,6 @@ router.post('/', async (req, res) => {
       brandColorMode,
       brandColor,
       sellingPoints,
-      complexity,
       selectedImageTasks = [],
       referenceImages = [],
       primaryReferenceImageUrl = ''
@@ -660,14 +764,6 @@ router.post('/', async (req, res) => {
     const brandColorLabel = getBrandColorLabel(brandColorMode, brandColor)
 
     const imageContentParts = await buildImageContentParts(explicitPrimaryReferenceImageUrl, referenceImages)
-    const globalRules = buildGlobalRules({
-      marketplace: marketplace || 'UK',
-      imageLanguage: marketplaceLanguage,
-      fontPreference,
-      brandColorMode,
-      brandColor
-    })
-
     const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl =
       process.env.AGENT_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
@@ -680,15 +776,6 @@ router.post('/', async (req, res) => {
         message: 'OPENAI_API_KEY is not configured'
       })
     }
-
-    const taskFrameworkDescription = requestedTasks
-      .map((item, index) => [
-        `Image ${index + 1} | ${item.name}`,
-        `Task type: ${item.taskType}`,
-        `Purpose: ${item.purpose}`,
-        `Guidance: ${item.guidance}`
-      ].join('\n'))
-      .join('\n\n')
 
     const openai = new OpenAI({
       apiKey,
@@ -705,154 +792,66 @@ router.post('/', async (req, res) => {
       referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0
     })
 
-    const systemPrompt = `
-You are a senior Amazon listing image strategist.
+    const productBlueprintSystemPrompt = `
+You are a product-visual forensics specialist for Amazon image production.
+Your only job is to understand the real product before any marketing image is planned.
+Return JSON only with one top-level key: productBlueprint.
 
-Architecture:
-1. Global Rules are fixed engine rules.
-2. Product Blueprint describes the product itself.
-3. Visual Blueprint is code-defined and must NOT be invented by you.
-4. Image Strategy is per-image planning.
+The blueprint must include:
+- identity: productType, category, market, archetype
+- appearance: primaryColor, material, distinctiveFeatures
+- structure: parts, connections, visibleEvidence
+- mounting: mountType, supportSurface, placement, connectionType, relationship, allowed, forbidden
+- usage: useMode, supportObject, contactPoint, spatialRelationship, effectDirection, requiredVisibleEvidence, forbiddenSpatialRelations
+- relationships: mustKeep
+- behavior: motion, adjustment
+- reference: primaryReference, secondaryReference, styleReference, rules
+- confidence: appearance, structure, mounting (0 to 1)
+- uncertainties
 
-Return JSON only.
-The top-level object must contain:
-- productBlueprint
-- imagePlans
-
-productBlueprint must include:
-- identity
-- appearance
-- structure
-- mounting
-- usage
-- relationships
-- behavior
-- reference
-- confidence
-
-identity must include:
-- productType
-- category
-- market
-- archetype
-
-mounting should focus on product attributes:
-- mountType
-- supportSurface
-- placement
-- connectionType
-- relationship
-- allowed
-- forbidden
-
-usage must explain how the real product is physically used in a scene:
-- useMode
-- supportObject
-- contactPoint
-- spatialRelationship
-- effectDirection
-- requiredVisibleEvidence
-- forbiddenSpatialRelations
-
-imagePlans must contain exactly ${requestedTasks.length} items in the same order as the selected image task list.
-
-Each image plan must include:
-- id
-- name
-- type
-- goal
-- focus
-- layout
-- constraints
-- successCriteria
-- failureCriteria
-- copy
-- promptHint
-
-Rules:
-1. Build productBlueprint first from the product itself.
-2. Do not generate visualBlueprint. That layer is handled by code templates.
-3. Do not write long prompts. promptHint must stay concise, editable, and Chinese.
-4. constraints must be short, hard, and non-negotiable for that image.
-5. copy must be a short Chinese text array, not paragraphs.
-6. Use reference priority correctly: product references control structure, style references control only composition and mood.
-7. Avoid SKU-specific hardcoded environmental assumptions unless clearly supported by product data and references.
-8. Prefer general mounting relationships such as support edge, outer surface, hanging point, flush attachment, or freestanding placement.
-9. Main image must obey Amazon hero-image rules.
-10. Inspect the primary image before planning. Extract visible parts, connections, contact geometry, orientation, and operating direction from the references and product information.
-11. The primary image is the highest authority for appearance and structure. Supporting images only clarify unseen angles, details, or usage; they must never redefine the product.
-12. For mounted products, describe a valid contact relationship: what touches what, which side each object occupies, how the product is supported, and what visible evidence proves the mounting is physically possible.
-13. Never invent SKU-specific mounting facts. If the references and product information do not establish a relationship, keep it generic and lower mounting confidence.
-14. For scenario and steps images, successCriteria must describe visible proof that the use or installation is physically correct. failureCriteria must describe visible results that make the image unusable.
-15. Do not repeat generic product descriptions inside successCriteria or failureCriteria. Use short, visually verifiable statements.
+Evidence rules:
+1. Inspect the explicit primary image first. It is the highest authority for shape, color, proportions, structure, printed marks, accessories, and connections.
+2. Supporting product images may reveal other angles or usage, but cannot override the primary product identity.
+3. Product text explains specifications and intended use, but must not override visible product truth.
+4. List concrete visible parts, not broad groups. Include cables, controllers, connectors, jaws, handles, bulbs, buttons, fasteners, and other visually important parts when present.
+5. Describe how every major part connects to the next part as one continuous physical product.
+6. For mounted or supported products, describe exact contact geometry, inside/outside placement, force or support logic, and visible proof that makes the installation believable.
+7. Do not invent hidden geometry or package contents. Put unverified facts in uncertainties.
+8. primaryColor may not be empty when colors are visible in the references.
+9. visibleEvidence and requiredVisibleEvidence must describe what a generated image must visibly preserve, not abstract product benefits.
 `.trim()
 
-    const userPrompt = `
-Product Input
-- Product Name: ${trimForModel(productName, 300)}
-- Category: ${trimForModel(category || 'Not provided', 300)}
-- Marketplace: ${marketplace || 'UK'}
-- Image Language: ${marketplaceLanguage}
-- Font Preference: ${fontStyleLabel}
-- Brand Color Preference: ${brandColorLabel}
-- Dimensions: ${trimForModel(dimensions || 'Not provided', 500)}
-- Material: ${trimForModel(material || 'Not provided', 500)}
-- Target Audience: ${trimForModel(targetAudience || 'Not provided', 500)}
-- Additional Info: ${trimForModel(additionalInfo || 'None', 1200)}
-- Custom Design Notes: ${trimForModel(designNotes || 'None', 600)}
-- Complexity: ${complexity || 'L2'}
-
-Selling Points
-${trimForModel(sellingPoints, 1200)}
-
-Task List
-${taskFrameworkDescription}
-
-Global Rules
-${JSON.stringify(globalRules, null, 2)}
-
-Known Product Signals
-${JSON.stringify(productSignals, null, 2)}
-
-Planning Guidance
-- Product Blueprint should describe the product itself, not generic engine rules.
-- Mounting should describe support surfaces, placement, and relationships in reusable terms.
-- Image Strategy should say why each image exists and what must not go wrong.
-- Keep outputs concise and execution-ready.
+    const productBlueprintUserPrompt = `
+Product Name: ${trimForModel(productName, 300)}
+Category: ${trimForModel(category || 'Not provided', 300)}
+Marketplace: Amazon ${marketplace || 'UK'}
+Dimensions: ${trimForModel(dimensions || 'Not provided', 900)}
+Material: ${trimForModel(material || 'Not provided', 1200)}
+Target Audience: ${trimForModel(targetAudience || 'Not provided', 900)}
+Selling Points: ${trimForModel(sellingPoints, 3500)}
+Full Listing Source: ${trimForModel(listingInfo || 'Not provided', 8000)}
+Usage, scene, and supplementary requirements: ${trimForModel(additionalInfo || 'None', 8000)}
+Known text signals: ${JSON.stringify(productSignals)}
 `.trim()
 
-    const completion = await createAgentCompletion(openai, {
+    const blueprintCompletion = await createAgentCompletion(openai, {
       model,
       messages: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: productBlueprintSystemPrompt },
         {
           role: 'user',
           content: imageContentParts.length > 0
-            ? [{ type: 'text', text: userPrompt }, ...imageContentParts]
-            : userPrompt
+            ? [{ type: 'text', text: productBlueprintUserPrompt }, ...imageContentParts]
+            : productBlueprintUserPrompt
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.2,
-      max_tokens: 4200
+      temperature: 0.1,
+      max_tokens: 4500
     })
 
-    let rawContent = completion.choices[0].message.content || ''
-    rawContent = rawContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
-
-    const firstBrace = rawContent.indexOf('{')
-    const lastBrace = rawContent.lastIndexOf('}')
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      rawContent = rawContent.slice(firstBrace, lastBrace + 1)
-    }
-
-    const result = JSON.parse(rawContent)
-
-    if (!Array.isArray(result.imagePlans) || result.imagePlans.length !== requestedTasks.length) {
-      throw new Error(`Agent must return exactly ${requestedTasks.length} image plans`)
-    }
-
-    const productBlueprint = normalizeProductBlueprint(result.productBlueprint, {
+    const blueprintResult = parseCompletionJson(blueprintCompletion, 'Product understanding')
+    let productBlueprint = normalizeProductBlueprint(blueprintResult.productBlueprint, {
       productName,
       category,
       marketplace,
@@ -863,8 +862,157 @@ Planning Guidance
       signals: productSignals
     })
 
-    result.imagePlans = result.imagePlans.map((plan, index) => {
-      const requestedTask = requestedTasks[index]
+    let blueprintQualityIssues = getBlueprintQualityIssues(productBlueprint)
+    let blueprintRepairUsage = null
+    if (blueprintQualityIssues.length > 0 && imageContentParts.length > 0) {
+      const repairPrompt = [
+        productBlueprintUserPrompt,
+        'The previous blueprint had these quality problems:',
+        blueprintQualityIssues.map((issue) => `- ${issue}`).join('\n'),
+        'Previous blueprint:',
+        JSON.stringify(productBlueprint, null, 2),
+        'Re-inspect the images and return a corrected complete productBlueprint. Do not guess; use uncertainties where evidence is insufficient.'
+      ].join('\n\n')
+
+      const repairCompletion = await createAgentCompletion(openai, {
+        model,
+        messages: [
+          { role: 'system', content: productBlueprintSystemPrompt },
+          {
+            role: 'user',
+            content: [{ type: 'text', text: repairPrompt }, ...imageContentParts]
+          }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+        max_tokens: 4500
+      })
+      const repairResult = parseCompletionJson(repairCompletion, 'Product understanding repair')
+      productBlueprint = normalizeProductBlueprint(repairResult.productBlueprint, {
+        productName,
+        category,
+        marketplace,
+        material,
+        sellingPoints,
+        additionalInfo,
+        referenceImages,
+        signals: productSignals
+      })
+      blueprintQualityIssues = getBlueprintQualityIssues(productBlueprint)
+      blueprintRepairUsage = repairCompletion.usage
+    }
+
+    const criticalBlueprintIssues = blueprintQualityIssues.filter((issue) => [
+      'visible product parts are incomplete',
+      'mounting contact points are missing',
+      'visible proof of correct use or mounting is missing'
+    ].includes(issue))
+
+    if (criticalBlueprintIssues.length > 0) {
+      return res.status(422).json({
+        error: 'Product understanding incomplete',
+        message: `产品图理解未通过：${criticalBlueprintIssues.join('；')}。请补充更清楚的产品结构图或实际使用图后重新分析。`,
+        details: {
+          issues: blueprintQualityIssues,
+          productBlueprint
+        }
+      })
+    }
+
+    const strategyTasks = requestedTasks.filter((task) => task.taskType !== 'main')
+    const strategyTaskDescription = strategyTasks
+      .map((item, index) => [
+        `Plan ${index + 1} | ${item.name}`,
+        `taskKey: ${item.taskKey}`,
+        `Task type: ${item.taskType}`,
+        `Purpose: ${item.purpose}`,
+        `Guidance: ${item.guidance}`
+      ].join('\n'))
+      .join('\n\n')
+
+    let strategyCompletion = null
+    let strategyResult = { imagePlans: [] }
+    if (strategyTasks.length > 0) {
+      const strategySystemPrompt = `
+You are a senior Amazon listing image strategist for high-volume, non-branded products.
+The product has already been analyzed. Plan only the requested non-main images.
+Return JSON only with one top-level key: imagePlans.
+imagePlans must contain exactly ${strategyTasks.length} items in the same order as the task list.
+
+Each plan must include:
+- taskKey, name, type
+- goal: the commercial result or buyer question this image resolves
+- focus: the single purchase reason assigned to this image
+- layout: a product-specific composition, not a generic template name
+- constraints, successCriteria, failureCriteria
+- copy: exact short ${marketplaceLanguage} text allowed to appear in the image
+- allowTextOverlay
+- strategyBody: the canonical Chinese strategy reviewed and edited by operators
+
+Strategy rules:
+1. strategyBody is the source of truth. Write 6 to 10 clear Chinese sentences that an operator can understand without reading hidden JSON fields.
+2. State what buyer question the image answers, which one selling point it uses, what the viewer must see, how the real product is positioned or used, the exact allowed on-image copy, and what would make the image unusable.
+3. Use one primary purchase reason per image. Distribute supplied selling points across plans and do not repeat a selling point unless product truth requires it.
+4. The image must prove the selling point visually. Do not plan invisible internal mechanisms as if they can be photographed.
+5. Use the supplied usage steps, pain points, installation methods, and scene requirements when relevant. Do not replace them with generic lifestyle scenes.
+6. For products with mounting, contact, movement, or direction, describe visible geometry and success evidence precisely.
+7. Text is forbidden only for the Amazon main image, which is handled separately. Other image types may use concise text when it improves conversion or understanding.
+8. copy must come from confirmed selling points, dimensions, usage, or supplied requirements. Localize and shorten it for Amazon ${marketplace || 'UK'}, but never invent a new claim.
+9. Prefer one headline plus at most one short supporting line. Do not split one benefit into three redundant labels.
+10. Do not force left-product/right-text or any repeated layout. Choose composition from the product shape, visible evidence, and buyer question.
+11. Product Blueprint is factual evidence. Do not dump blueprint fields into strategyBody; convert them into a useful selling image plan.
+12. Respect uncertainties. Do not build a strategy around an unverified variant, accessory, quantity, or performance claim.
+`.trim()
+
+      const strategyUserPrompt = `
+Validated Product Blueprint
+${JSON.stringify(productBlueprint, null, 2)}
+
+Product and business source
+- Product Name: ${trimForModel(productName, 300)}
+- Marketplace: Amazon ${marketplace || 'UK'}
+- Image Language: ${marketplaceLanguage}
+- Selling Points: ${trimForModel(sellingPoints, 3500)}
+- Dimensions: ${trimForModel(dimensions || 'Not provided', 900)}
+- Full Listing Source: ${trimForModel(listingInfo || 'Not provided', 7000)}
+- Usage, scenes, and supplementary requirements: ${trimForModel(additionalInfo || 'None', 7000)}
+- Custom Design Notes: ${trimForModel(designNotes || 'None', 600)}
+- Font Preference: ${fontStyleLabel}
+- Brand Color Preference: ${brandColorLabel}
+
+Requested image tasks
+${strategyTaskDescription}
+
+Blueprint validation warnings
+${blueprintQualityIssues.length > 0 ? blueprintQualityIssues.join(' | ') : 'None'}
+`.trim()
+
+      strategyCompletion = await createAgentCompletion(openai, {
+        model,
+        messages: [
+          { role: 'system', content: strategySystemPrompt },
+          { role: 'user', content: strategyUserPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.25,
+        max_tokens: Math.min(11000, 3200 + strategyTasks.length * 1000)
+      })
+      strategyResult = parseCompletionJson(strategyCompletion, 'Image strategy')
+
+      if (!Array.isArray(strategyResult.imagePlans) || strategyResult.imagePlans.length !== strategyTasks.length) {
+        throw new Error(`Agent must return exactly ${strategyTasks.length} non-main image plans`)
+      }
+    }
+
+    let nonMainPlanIndex = 0
+    const normalizedPlans = requestedTasks.map((requestedTask, index) => {
+      if (requestedTask.taskType === 'main') {
+        return createFixedMainPlan(requestedTask, index + 1)
+      }
+
+      const plan = strategyResult.imagePlans[nonMainPlanIndex] || {}
+      nonMainPlanIndex += 1
+
       const normalizedConstraints =
         normalizeStringArray(plan.constraints, 12).length > 0
           ? normalizeStringArray(plan.constraints, 12)
@@ -873,7 +1021,10 @@ Planning Guidance
       const normalizedFocus = String(
         plan.focus || (requestedTask.taskType === 'main' ? '完整产品主体' : '当前图片核心卖点')
       ).trim()
-      const promptHint = String(plan.promptHint || plan.prompt || '').trim()
+      const strategyBody = String(plan.strategyBody || plan.prompt || plan.promptHint || '').trim()
+      const promptHint = String(plan.promptHint || strategyBody).trim()
+
+      const allowTextOverlay = Boolean(plan.allowTextOverlay)
 
       return {
         id: index + 1,
@@ -889,13 +1040,15 @@ Planning Guidance
         textDensity: String(plan.textDensity || '').trim(),
         style: String(plan.style || '').trim(),
         visualKeywords: normalizeStringArray(plan.visualKeywords, 8),
-        constraints: normalizedConstraints,
-        hardConstraints: normalizedConstraints,
-        successCriteria: normalizeStringArray(plan.successCriteria, 8),
-        failureCriteria: normalizeStringArray(plan.failureCriteria, 8),
-        copy: normalizeStringArray(plan.copy, 6),
+        constraints: normalizedConstraints.slice(0, 6),
+        hardConstraints: normalizedConstraints.slice(0, 6),
+        successCriteria: normalizeStringArray(plan.successCriteria, 4),
+        failureCriteria: normalizeStringArray(plan.failureCriteria, 4),
+        copy: allowTextOverlay ? normalizeStringArray(plan.copy, 2) : [],
+        allowTextOverlay,
+        strategyBody: strategyBody || promptHint,
         promptHint,
-        prompt: promptHint,
+        prompt: strategyBody || promptHint,
         visualBlueprint: normalizeVisualBlueprint({}, requestedTask.taskType),
         promptEn: String(plan.promptEn || plan.englishPrompt || '').trim(),
         promptDirty: false
@@ -903,13 +1056,12 @@ Planning Guidance
     })
 
     const responseData = {
-      globalRules,
-      globalConstraints: globalRules,
       productBlueprint,
-      imagePlans: result.imagePlans,
+      imagePlans: normalizedPlans,
       _meta: {
-        complexity: complexity || 'L2',
         requestedImageCount: requestedTasks.length,
+        productUnderstandingWarnings: blueprintQualityIssues,
+        productUnderstandingRepaired: Boolean(blueprintRepairUsage),
         generatedAt: new Date().toISOString()
       }
     }
@@ -917,7 +1069,11 @@ Planning Guidance
     res.json({
       success: true,
       data: responseData,
-      usage: completion.usage
+      usage: {
+        productUnderstanding: blueprintCompletion.usage,
+        productUnderstandingRepair: blueprintRepairUsage,
+        strategy: strategyCompletion?.usage || null
+      }
     })
   } catch (error) {
     console.error('Agent analysis error:', error)

@@ -1,6 +1,85 @@
 import { useMemo, useState } from 'react'
 import './TaskGrid.css'
 
+const MAX_REFERENCE_SIZE = 10 * 1024 * 1024
+
+function Icon({ name }) {
+  const commonProps = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '2',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true'
+  }
+
+  if (name === 'eye') {
+    return (
+      <svg {...commonProps}>
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    )
+  }
+
+  if (name === 'download') {
+    return (
+      <svg {...commonProps}>
+        <path d="M12 3v11" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </svg>
+    )
+  }
+
+  if (name === 'refresh') {
+    return (
+      <svg {...commonProps}>
+        <path d="M21 12a9 9 0 0 1-15 6.7" />
+        <path d="M3 12a9 9 0 0 1 15-6.7" />
+        <path d="M18 3v5h-5" />
+        <path d="M6 21v-5h5" />
+      </svg>
+    )
+  }
+
+  if (name === 'history') {
+    return (
+      <svg {...commonProps}>
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    )
+  }
+
+  if (name === 'play') {
+    return (
+      <svg {...commonProps}>
+        <path d="M8 5v14l11-7Z" />
+      </svg>
+    )
+  }
+
+  return null
+}
+
+function ActionIconButton({ icon, label, className = '', children, ...props }) {
+  return (
+    <button
+      type="button"
+      className={`action-icon-btn ${className}`.trim()}
+      title={label}
+      aria-label={label}
+      {...props}
+    >
+      <Icon name={icon} />
+      {children ? <span className="action-icon-badge">{children}</span> : null}
+    </button>
+  )
+}
+
 function getImageVariants(image) {
   const variants = []
 
@@ -9,11 +88,7 @@ function getImageVariants(image) {
       key: 'current',
       label: '当前图',
       imageUrl: image.imageUrl,
-      prompt: image.prompt || '',
-      promptEn: image.promptEn || '',
-      requestedResolution: image.requestedResolution || null,
-      actualResolution: image.actualResolution || null,
-      sizeMatchesRequest: image.sizeMatchesRequest
+      requestedResolution: image.requestedResolution || null
     })
   }
 
@@ -24,12 +99,7 @@ function getImageVariants(image) {
       key: `history-${index}`,
       label: `历史 ${index + 1}`,
       imageUrl: version.imageUrl,
-      prompt: version.prompt || '',
-      promptEn: version.promptEn || '',
-      requestedResolution: version.requestedResolution || null,
-      actualResolution: version.actualResolution || null,
-      sizeMatchesRequest: version.sizeMatchesRequest,
-      savedAt: version.savedAt || null
+      requestedResolution: version.requestedResolution || null
     })
   })
 
@@ -62,13 +132,12 @@ export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAl
 }
 
 function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue }) {
-  const [editingImageId, setEditingImageId] = useState(null)
-  const [editedPrompt, setEditedPrompt] = useState('')
   const [previewState, setPreviewState] = useState(null)
   const [previewZoom, setPreviewZoom] = useState(1)
-  const [regenerateConfirm, setRegenerateConfirm] = useState(null)
+  const [regenerateDialog, setRegenerateDialog] = useState(null)
+  const [dialogError, setDialogError] = useState('')
 
-  const completedImages = task.images?.filter((img) => img.status === 'completed' && img.imageUrl) || []
+  const completedImages = task.images?.filter((image) => image.status === 'completed' && image.imageUrl) || []
   const statusClassName =
     task.status === 'completed'
       ? 'status-done'
@@ -82,16 +151,10 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
     if (!previewState?.image) return []
     return getImageVariants(previewState.image)
   }, [previewState])
-
   const activePreviewVariant = previewVariants[previewState?.variantIndex || 0] || null
 
-  const handleEditPrompt = (img) => {
-    setEditingImageId(img.imageId)
-    setEditedPrompt(img.prompt || '')
-  }
-
-  const handleOpenPreview = (img, variantIndex = 0) => {
-    setPreviewState({ image: img, variantIndex })
+  const handleOpenPreview = (image, variantIndex = 0) => {
+    setPreviewState({ image, variantIndex })
     setPreviewZoom(1)
   }
 
@@ -100,31 +163,76 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
     setPreviewZoom(1)
   }
 
-  const handleRequestRegenerate = (imageIndex, prompt = '') => {
+  const closeRegenerateDialog = () => {
+    if (regenerateDialog?.referencePreviewUrl) {
+      URL.revokeObjectURL(regenerateDialog.referencePreviewUrl)
+    }
+    setRegenerateDialog(null)
+    setDialogError('')
+  }
+
+  const openRegenerateDialog = (imageIndex) => {
     const image = task.images?.[imageIndex]
     if (!image) return
 
-    setRegenerateConfirm({
+    setDialogError('')
+    setRegenerateDialog({
       imageIndex,
       imageId: image.imageId,
-      prompt,
-      hasHistory: Boolean(image.imageUrl)
+      imageName: image.name || '',
+      prompt: image.prompt || '',
+      referenceFile: null,
+      referencePreviewUrl: ''
+    })
+  }
+
+  const handleReferenceFileChange = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setDialogError('只能追加 JPG、PNG 或 WebP 图片。')
+      return
+    }
+    if (file.size > MAX_REFERENCE_SIZE) {
+      setDialogError('追加参考图不能超过 10MB。')
+      return
+    }
+
+    setDialogError('')
+    setRegenerateDialog((previous) => {
+      if (!previous) return previous
+      if (previous.referencePreviewUrl) URL.revokeObjectURL(previous.referencePreviewUrl)
+      return {
+        ...previous,
+        referenceFile: file,
+        referencePreviewUrl: URL.createObjectURL(file)
+      }
+    })
+  }
+
+  const removeAdditionalReference = () => {
+    setRegenerateDialog((previous) => {
+      if (!previous) return previous
+      if (previous.referencePreviewUrl) URL.revokeObjectURL(previous.referencePreviewUrl)
+      return { ...previous, referenceFile: null, referencePreviewUrl: '' }
     })
   }
 
   const handleConfirmRegenerate = () => {
-    if (!regenerateConfirm || !onRegenerate) return
-    onRegenerate(task, regenerateConfirm.imageIndex, regenerateConfirm.prompt)
-    setRegenerateConfirm(null)
-  }
-
-  const handleSavePrompt = () => {
-    const imageIndex = task.images.findIndex((img) => img.imageId === editingImageId)
-    if (imageIndex >= 0) {
-      handleRequestRegenerate(imageIndex, editedPrompt)
+    if (!regenerateDialog || !onRegenerate) return
+    const prompt = regenerateDialog.prompt.trim()
+    if (!prompt) {
+      setDialogError('请保留或填写这张图的中文策略。')
+      return
     }
-    setEditingImageId(null)
-    setEditedPrompt('')
+
+    onRegenerate(task, regenerateDialog.imageIndex, {
+      prompt,
+      referenceFiles: regenerateDialog.referenceFile ? [regenerateDialog.referenceFile] : []
+    })
+    closeRegenerateDialog()
   }
 
   return (
@@ -135,258 +243,200 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
           <span className="task-time">{new Date(task.createdAt).toLocaleString('zh-CN')}</span>
         </div>
         <div className="task-actions">
-          {task.status === 'stopped' && (
-            <button className="continue-btn" onClick={() => onContinue?.(task)} title="从停止位置继续生成">
-              {'\u25B6\uFE0F'} 继续生成
+          {task.status === 'stopped' ? (
+            <button type="button" className="task-toolbar-btn" onClick={() => onContinue?.(task)} title="从停止位置继续生成">
+              <Icon name="play" />
+              <span>继续</span>
             </button>
-          )}
-          {completedImages.length > 0 && (
-            <button className="download-all-btn" onClick={() => onDownloadAll?.(completedImages)} title="一键下载全部图片">
-              {'\u{1F4E5}'} 批量下载
+          ) : null}
+          {completedImages.length > 0 ? (
+            <button type="button" className="task-toolbar-btn" onClick={() => onDownloadAll?.(completedImages)} title="下载全部图片">
+              <Icon name="download" />
+              <span>全部</span>
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
       <div className="task-meta">
-        <span className="meta-item">
-          分辨率 <strong>{task.resolution === '4k' ? '4K' : '2K'}</strong>
-        </span>
-        <span className="meta-item">
-          图片张数 <strong>{task.images?.length || 0}</strong>
-        </span>
-        <span className="meta-item">
-          进度 <strong className={statusClassName}>{completedImages.length}/{task.images?.length || 0}</strong>
-        </span>
-        {task.status === 'stopping' && <span className="meta-item status-stopping">正在停止...</span>}
-        {task.status === 'stopped' && <span className="meta-item status-stopped">已停止</span>}
-        {task.status === 'failed' && <span className="meta-item status-failed">任务失败</span>}
+        <span className="meta-item">分辨率 <strong>{task.resolution === '4k' ? '4K' : '2K'}</strong></span>
+        <span className="meta-item">图片张数 <strong>{task.images?.length || 0}</strong></span>
+        <span className="meta-item">进度 <strong className={statusClassName}>{completedImages.length}/{task.images?.length || 0}</strong></span>
+        {task.status === 'stopping' ? <span className="meta-item status-stopping">正在停止...</span> : null}
+        {task.status === 'stopped' ? <span className="meta-item status-stopped">已停止</span> : null}
+        {task.status === 'failed' ? <span className="meta-item status-failed">任务失败</span> : null}
       </div>
 
       <div className="task-images-grid">
-        {task.images && task.images.length > 0 ? (
-          task.images.map((img, idx) => {
-            const variantCount = Array.isArray(img.versions) ? img.versions.length : 0
-            const isRegenerating = img.status === 'regenerating'
+        {task.images?.length ? task.images.map((image, index) => {
+          const variantCount = Array.isArray(image.versions) ? image.versions.length : 0
+          const isRegenerating = image.status === 'regenerating'
 
-            return (
-              <div key={idx} className="task-image-card">
-                <div className="image-card-header">
-                  <div className="image-card-heading">
-                    <span className="image-badge">图 {img.imageId}</span>
-                    {img.name && <span className="image-name">{img.name}</span>}
-                  </div>
-                  <span className={`image-status status-${img.status || 'pending'}`}>
-                    {img.status === 'completed'
-                      ? '\u2705'
-                      : img.status === 'failed'
-                        ? '\u274C'
-                        : img.status === 'regenerating'
-                          ? '\u{1F504}'
-                          : '\u23F3'}
-                  </span>
+          return (
+            <div key={image.imageId ?? index} className="task-image-card">
+              <div className="image-card-header">
+                <div className="image-card-heading">
+                  <span className="image-badge">图 {image.imageId}</span>
+                  {image.name ? <span className="image-name">{image.name}</span> : null}
                 </div>
+                <span className={`image-status status-${image.status || 'pending'}`}>
+                  {image.status === 'completed' ? '完成' : image.status === 'failed' ? '失败' : image.status === 'regenerating' ? '重新生成中' : '等待'}
+                </span>
+              </div>
 
-                {img.actualResolution && (
-                  <div className={`image-resolution ${img.sizeMatchesRequest === false ? 'mismatch' : ''}`}>
-                    实际: {img.actualResolution}
-                    {img.requestedResolution && <span> / 请求: {img.requestedResolution}</span>}
-                    {img.sizeMatchesRequest === false && <span> / 下载保持原始输出，不会强行放大</span>}
-                  </div>
-                )}
-
-                {img.prompt && (
-                  <div className="image-prompt-display">
-                    <small>
-                      <strong>当前策略:</strong> {img.prompt}
-                    </small>
-                  </div>
-                )}
-
-                {img.promptEn && (
-                  <details className="english-prompt-details">
-                    <summary>查看英文 Prompt</summary>
-                    <small>{img.promptEn}</small>
-                  </details>
-                )}
-
-                {img.regenerationError && (
-                  <div className="regeneration-warning">
-                    重新生成失败，已保留上一张可用图片：{img.regenerationError}
-                  </div>
-                )}
-
-                <div className="image-content">
-                  {img.imageUrl ? (
-                    <button className="image-preview-button" onClick={() => handleOpenPreview(img)} title="点击查看大图">
-                      <img src={img.imageUrl} alt={`生成图片 ${img.imageId}`} />
-                      {isRegenerating && (
-                        <span className="image-regenerating-overlay">重新生成中，旧图已保留</span>
-                      )}
-                    </button>
-                  ) : img.status === 'failed' ? (
-                    <div className="image-error">
-                      <span>生成失败</span>
-                      <small>{img.error || '未知错误'}</small>
-                    </div>
-                  ) : (
-                    <div className="image-pending">正在生成...</div>
-                  )}
+              {image.actualResolution ? (
+                <div className={`image-resolution ${image.sizeMatchesRequest === false ? 'mismatch' : ''}`}>
+                  实际 {image.actualResolution}{image.requestedResolution ? <span> / 请求 {image.requestedResolution}</span> : null}
                 </div>
+              ) : null}
 
-                <div className="image-card-actions">
-                  {img.imageUrl && (
-                    <>
-                      <button className="action-btn preview" onClick={() => handleOpenPreview(img)} title="查看大图">
-                        {'\u{1F50D}'}
-                      </button>
-                      <button
-                        className="action-btn download"
-                        onClick={() => onDownload?.(img.imageUrl, `image-${img.imageId}.png`, img.requestedResolution)}
-                        title="下载图片"
-                      >
-                        {'\u2B07\uFE0F'}
-                      </button>
-                      {variantCount > 0 && (
-                        <button
-                          className="action-btn history"
-                          onClick={() => handleOpenPreview(img, 1)}
-                          title="查看历史版本"
-                        >
-                          历史 {variantCount}
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  {img.status !== 'pending' && img.status !== 'regenerating' && (
-                    <button
-                      className="action-btn regenerate"
-                      onClick={() => handleRequestRegenerate(idx)}
-                      title="重新生成这张图"
-                    >
-                      {'\u{1F504}'} 重生成
-                    </button>
-                  )}
-
-                  {img.status !== 'pending' && img.status !== 'failed' && img.status !== 'regenerating' && (
-                    <button className="action-btn edit" onClick={() => handleEditPrompt(img)} title="修改策略后重新生成">
-                      {'\u270F\uFE0F'}
-                    </button>
-                  )}
+              {image.prompt ? (
+                <div className="image-prompt-display">
+                  <strong>当前中文策略</strong>
+                  <p>{image.prompt}</p>
                 </div>
+              ) : null}
 
-                {editingImageId === img.imageId ? (
-                  <div className="prompt-editor">
-                    <textarea
-                      value={editedPrompt}
-                      onChange={(event) => setEditedPrompt(event.target.value)}
-                      rows={3}
-                      placeholder="输入新的 Prompt 或中文策略说明"
-                    />
-                    <div className="editor-actions">
-                      <button className="btn-save" onClick={handleSavePrompt}>
-                        重新生成
-                      </button>
-                      <button className="btn-cancel" onClick={() => setEditingImageId(null)}>
-                        取消
-                      </button>
-                    </div>
-                  </div>
+              {image.lastRegeneration ? (
+                <div className="regeneration-summary">
+                  上次重新生成使用 {image.lastRegeneration.usedReferenceCount} 张参考图
+                  {image.lastRegeneration.addedReferenceCount ? `，其中新增 ${image.lastRegeneration.addedReferenceCount} 张` : ''}
+                </div>
+              ) : null}
+
+              {image.regenerationError ? (
+                <div className="regeneration-warning">重新生成失败，已保留上一张图片：{image.regenerationError}</div>
+              ) : null}
+
+              <div className="image-content">
+                {image.imageUrl ? (
+                  <button className="image-preview-button" onClick={() => handleOpenPreview(image)} title="查看大图">
+                    <img src={image.imageUrl} alt={`生成图片 ${image.imageId}`} />
+                    {isRegenerating ? <span className="image-regenerating-overlay">重新生成中，旧图已保留</span> : null}
+                  </button>
+                ) : image.status === 'failed' ? (
+                  <div className="image-error"><span>生成失败</span><small>{image.error || '未知错误'}</small></div>
                 ) : (
-                  img.prompt && (
-                    <div className="image-prompt">
-                      <small>
-                        {img.prompt.substring(0, 100)}
-                        {img.prompt.length > 100 ? '...' : ''}
-                      </small>
-                    </div>
-                  )
+                  <div className="image-pending">正在生成...</div>
                 )}
               </div>
-            )
-          })
-        ) : (
-          <div className="task-placeholder">暂无图片</div>
-        )}
+
+              <div className="image-card-actions">
+                {image.imageUrl ? (
+                  <>
+                    <ActionIconButton icon="eye" label="查看大图" onClick={() => handleOpenPreview(image)} />
+                    <ActionIconButton icon="download" label="下载图片" onClick={() => onDownload?.(image.imageUrl, `image-${image.imageId}.png`, image.requestedResolution)} />
+                    {variantCount > 0 ? (
+                      <ActionIconButton icon="history" label={`查看历史版本（${variantCount} 张）`} onClick={() => handleOpenPreview(image, 1)}>
+                        {variantCount}
+                      </ActionIconButton>
+                    ) : null}
+                  </>
+                ) : null}
+                {image.status !== 'pending' && image.status !== 'regenerating' ? (
+                  <ActionIconButton icon="refresh" label="重新生成" className="regenerate" onClick={() => openRegenerateDialog(index)} />
+                ) : null}
+              </div>
+            </div>
+          )
+        }) : <div className="task-placeholder">暂无图片</div>}
       </div>
 
-      {previewState && activePreviewVariant && (
+      {previewState && activePreviewVariant ? (
         <div className="image-preview-modal" onClick={handleClosePreview}>
           <div className="image-preview-dialog" onClick={(event) => event.stopPropagation()}>
             <div className="image-preview-toolbar">
-              <div className="image-preview-title">
-                图 {previewState.image.imageId} 预览{previewState.image.name ? ` · ${previewState.image.name}` : ''}
-              </div>
+              <div className="image-preview-title">图 {previewState.image.imageId} 预览{previewState.image.name ? ` · ${previewState.image.name}` : ''}</div>
               <div className="image-preview-controls">
-                <button onClick={() => setPreviewZoom((prev) => Math.max(0.5, prev - 0.25))} title="缩小">
-                  -
-                </button>
+                <button onClick={() => setPreviewZoom((value) => Math.max(0.5, value - 0.25))}>-</button>
                 <span>{Math.round(previewZoom * 100)}%</span>
-                <button onClick={() => setPreviewZoom((prev) => Math.min(3, prev + 0.25))} title="放大">
-                  +
-                </button>
-                <button onClick={() => setPreviewZoom(1)} title="恢复原始比例">
-                  100%
-                </button>
-                <button
-                  onClick={() => onDownload?.(activePreviewVariant.imageUrl, `image-${previewState.image.imageId}.png`, activePreviewVariant.requestedResolution)}
-                  title="下载当前查看版本"
-                >
-                  下载
-                </button>
-                <button onClick={handleClosePreview} title="关闭">
-                  ×
-                </button>
+                <button onClick={() => setPreviewZoom((value) => Math.min(3, value + 0.25))}>+</button>
+                <button onClick={() => setPreviewZoom(1)}>100%</button>
+                <button onClick={() => onDownload?.(activePreviewVariant.imageUrl, `image-${previewState.image.imageId}.png`, activePreviewVariant.requestedResolution)}>下载</button>
+                <button onClick={handleClosePreview}>×</button>
               </div>
             </div>
-
-            {previewVariants.length > 1 && (
+            {previewVariants.length > 1 ? (
               <div className="image-preview-variants">
                 {previewVariants.map((variant, index) => (
                   <button
                     key={variant.key}
                     type="button"
                     className={`preview-variant-btn ${index === previewState.variantIndex ? 'active' : ''}`}
-                    onClick={() => {
-                      setPreviewState((prev) => ({ ...prev, variantIndex: index }))
-                      setPreviewZoom(1)
-                    }}
+                    onClick={() => { setPreviewState((value) => ({ ...value, variantIndex: index })); setPreviewZoom(1) }}
                   >
                     {variant.label}
                   </button>
                 ))}
               </div>
-            )}
-
+            ) : null}
             <div className="image-preview-stage">
-              <img
-                src={activePreviewVariant.imageUrl}
-                alt={`生成图片 ${previewState.image.imageId} 大图预览`}
-                style={{ transform: `scale(${previewZoom})` }}
-              />
+              <img src={activePreviewVariant.imageUrl} alt={`生成图片 ${previewState.image.imageId} 大图预览`} style={{ transform: `scale(${previewZoom})` }} />
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {regenerateConfirm && (
-        <div className="image-preview-modal" onClick={() => setRegenerateConfirm(null)}>
-          <div className="regenerate-confirm-dialog" onClick={(event) => event.stopPropagation()}>
-            <h4>确认重新生成</h4>
-            <p>图 {regenerateConfirm.imageId} 即将重新生成。</p>
-            <p>当前图片不会丢失，成功后旧图会自动保留到历史版本里。</p>
-            <div className="regenerate-confirm-actions">
-              <button type="button" className="btn-cancel" onClick={() => setRegenerateConfirm(null)}>
-                取消
-              </button>
-              <button type="button" className="btn-save" onClick={handleConfirmRegenerate}>
-                确认重生成
-              </button>
+      {regenerateDialog ? (
+        <div className="image-preview-modal regenerate-modal" onClick={closeRegenerateDialog}>
+          <div className="regenerate-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="regenerate-dialog__header">
+              <div>
+                <h4>重新生成图 {regenerateDialog.imageId}</h4>
+                <p>{regenerateDialog.imageName || '单张图片'}</p>
+              </div>
+              <button type="button" className="regenerate-dialog__close" onClick={closeRegenerateDialog}>×</button>
+            </div>
+
+            <div className="regenerate-dialog__body">
+              <label className="regenerate-field">
+                <span>本次中文策略</span>
+                <textarea
+                  rows={9}
+                  value={regenerateDialog.prompt}
+                  onChange={(event) => setRegenerateDialog((value) => ({ ...value, prompt: event.target.value }))}
+                />
+              </label>
+
+              <div className="regenerate-reference">
+                <div className="regenerate-reference__heading">
+                  <div>
+                    <strong>追加参考图（可选）</strong>
+                    <span>用于补充这一次的角度、安装关系或场景理解</span>
+                  </div>
+                  {!regenerateDialog.referenceFile ? (
+                    <label className="regenerate-upload-btn">
+                      选择图片
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleReferenceFileChange} />
+                    </label>
+                  ) : null}
+                </div>
+
+                {regenerateDialog.referenceFile ? (
+                  <div className="regenerate-reference__preview">
+                    <img src={regenerateDialog.referencePreviewUrl} alt="本次追加参考图" />
+                    <div><strong>{regenerateDialog.referenceFile.name}</strong><span>仅用于本次重新生成</span></div>
+                    <button type="button" onClick={removeAdditionalReference}>移除</button>
+                  </div>
+                ) : (
+                  <div className="regenerate-reference__empty">未追加图片，将继续使用原任务的 {task.referenceImages?.length || 0} 张参考图。</div>
+                )}
+              </div>
+
+              <div className="regenerate-usage-summary">
+                本次将使用：原参考图 {task.referenceImages?.length || 0} 张
+                {regenerateDialog.referenceFile ? ' + 新增参考图 1 张' : ''}，以及上方当前中文策略。原图片会保留到历史版本。
+              </div>
+              {dialogError ? <div className="regenerate-dialog__error">{dialogError}</div> : null}
+            </div>
+
+            <div className="regenerate-dialog__footer">
+              <button type="button" className="btn-cancel" onClick={closeRegenerateDialog}>取消</button>
+              <button type="button" className="btn-save" onClick={handleConfirmRegenerate}>开始重新生成</button>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
