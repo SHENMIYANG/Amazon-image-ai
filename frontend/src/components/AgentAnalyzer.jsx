@@ -7,28 +7,15 @@ import './AgentAnalyzer.css'
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 async function requestAnalysis(listing, referenceImages, primaryReferenceImageUrl) {
-  const maxAttempts = 3
+  const response = await fetch('/api/agent-analyze', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages, primaryReferenceImageUrl))
+  })
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await fetch('/api/agent-analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages, primaryReferenceImageUrl))
-      })
-
-      return await parseApiJson(response, '分析失败')
-    } catch (error) {
-      const transientStatus = [500, 502, 503, 504].includes(Number(error.status))
-      const shouldRetry = attempt < maxAttempts && (error.emptyResponse || transientStatus)
-      if (!shouldRetry) throw error
-      await wait(1200)
-    }
-  }
-
-  throw new Error('分析请求重试后仍未返回结果')
+  return await parseApiJson(response, '分析失败')
 }
 
 async function settleUploadedFiles() {
@@ -116,12 +103,12 @@ export default function AgentAnalyzer({
       const result = await requestAnalysis(listing, uploadedReferenceImages, explicitPrimaryReferenceImageUrl)
       onAnalyzeComplete(result.data)
 
-      setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图回填详细方案。`)
+      setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图补全详细方案。`)
     } catch (err) {
       console.error('Agent 分析失败:', err)
       setError(err.message)
 
-      if (err.message.includes('500') || err.message.includes('Internal Server Error')) {
+      if (String(err.message || '').includes('500') || String(err.message || '').includes('Internal Server Error')) {
         alert(`服务端内部错误\n\n${err.message}`)
       } else {
         alert(`分析失败：${err.message}`)

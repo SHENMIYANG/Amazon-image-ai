@@ -6,16 +6,24 @@ const router = express.Router()
 router.post('/', async (req, res) => {
   try {
     const { listing, plan, resolution } = req.body || {}
+    const strategyContent = String(plan?.strategyContent || plan?.strategyBody || plan?.prompt || '').trim()
 
-    if (!listing || (!plan?.prompt && !plan?.promptHint)) {
+    if (!listing || !strategyContent) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: 'listing and plan.prompt or plan.promptHint are required'
+        message: 'listing and plan.strategyContent are required'
       })
     }
 
-    const normalizedPlan = await translatePlanPromptIfNeeded(plan, listing, resolution || '2048x2048')
-    const promptEn = normalizedPlan.prompt || ''
+    const normalizedPlan = await translatePlanPromptIfNeeded(
+      {
+        ...plan,
+        strategyContent
+      },
+      listing,
+      resolution || '2048x2048'
+    )
+    const promptEn = normalizedPlan.promptEn || normalizedPlan.prompt || ''
     const executionPromptEn = buildAmazonPrompt(
       listing,
       normalizedPlan,
@@ -27,8 +35,7 @@ router.post('/', async (req, res) => {
     res.json({
       success: true,
       data: {
-        promptZh: normalizedPlan.originalPrompt || plan.prompt || '',
-        promptHint: plan.promptHint || '',
+        promptZh: normalizedPlan.originalPrompt || strategyContent,
         promptEn,
         executionPromptEn
       }

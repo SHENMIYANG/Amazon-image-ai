@@ -115,7 +115,7 @@ router.post('/', async (req, res) => {
       try {
         const taskType = plan.taskType || plan.type || 'feature'
         const normalizedPlan = taskType === 'main' && !plan.regenerationMode
-          ? { ...plan, originalPrompt: plan.strategyBody || plan.prompt || '' }
+          ? { ...plan, originalPrompt: plan.strategyContent || plan.strategyBody || plan.prompt || '' }
           : await translatePlanPromptIfNeeded(plan, executionListing, size)
         const prompt = buildAmazonPrompt(
           executionListing,
@@ -144,11 +144,14 @@ router.post('/', async (req, res) => {
           imageId: plan.id,
           name: plan.name,
           taskType: plan.taskType || plan.type || null,
+          imageRole: plan.imageRole || null,
+          buyerQuestion: plan.buyerQuestion || null,
+          primarySellingPoint: plan.primarySellingPoint || null,
           imageUrl: generatedImage.imageUrl,
           prompt,
-          promptEn: normalizedPlan.executionPrompt || normalizedPlan.executionPromptEn || '',
+          promptEn: normalizedPlan.promptEn || normalizedPlan.prompt || '',
           executionPromptEn: prompt,
-          promptZh: normalizedPlan.originalPrompt || plan.prompt || '',
+          promptZh: normalizedPlan.originalPrompt || plan.strategyContent || plan.prompt || '',
           status: 'completed',
           resolution: size,
           actualWidth: generatedImage.width,
@@ -163,6 +166,9 @@ router.post('/', async (req, res) => {
           imageId: plan.id,
           name: plan.name,
           taskType: plan.taskType || plan.type || null,
+          imageRole: plan.imageRole || null,
+          buyerQuestion: plan.buyerQuestion || null,
+          primarySellingPoint: plan.primarySellingPoint || null,
           status: 'failed',
           error: errorMessage,
           prompt: buildAmazonPrompt(
@@ -595,15 +601,12 @@ function cleanPromptText(value = '') {
 }
 
 function getExecutionHint(imagePlan = {}) {
-  const translatedExecution = cleanPromptText(imagePlan.executionPrompt || imagePlan.executionPromptEn)
-  if (translatedExecution) return translatedExecution
-
   const reusableEnglishPrompt = !imagePlan.promptDirty
     ? cleanPromptText(imagePlan.promptEn || imagePlan.englishPrompt)
     : ''
   if (reusableEnglishPrompt) return reusableEnglishPrompt
 
-  return cleanPromptText(imagePlan.strategyBody || imagePlan.prompt || imagePlan.promptHint || '')
+  return cleanPromptText(imagePlan.strategyContent || imagePlan.strategyBody || imagePlan.prompt || '')
 }
 
 function normalizeLineList(value = '', maxItems = 6, maxItemLength = 160) {
@@ -734,64 +737,13 @@ function summarizeProductTruth(productBlueprint = {}) {
 function getExactCopyInstruction(listing, imagePlan) {
   const copyLines = summarizeCopyLines(imagePlan)
   if (!imagePlan?.allowTextOverlay || copyLines.length === 0) {
-    return 'Do not render any text, captions, labels, icons, logos, or decorative lettering.'
+    return 'Do not add on-image text, labels, icons, badges, logos, or decorative lettering unless the strategy explicitly requires them.'
   }
 
   return [
     `Render only this exact ${getTargetImageLanguage(listing)} on-image copy: ${copyLines.map((line) => `"${line}"`).join(' | ')}.`,
     'Do not add, rewrite, repeat, split, or invent any other words.'
   ].join(' ')
-}
-
-function buildUsageScenePrompt(
-  listing,
-  imagePlan,
-  productBlueprint,
-  visualBlueprint,
-  resolution,
-  primaryReferenceImageUrl,
-  referenceImageRoles = []
-) {
-  const usage = productBlueprint.usage || {}
-  const strategyConstraints = normalizeStringArray(
-    Array.isArray(imagePlan?.constraints) ? imagePlan.constraints : imagePlan?.hardConstraints,
-    12
-  )
-  const executionHint = getExecutionHint(imagePlan)
-  const successCriteria = [
-    ...normalizeStringArray(imagePlan?.successCriteria, 3),
-    ...normalizeStringArray(usage.requiredVisibleEvidence, 3),
-    ...normalizeStringArray(usage.spatialRelationship, 2)
-  ].filter((item, index, source) => source.indexOf(item) === index).slice(0, 6)
-  const failureCriteria = [
-    ...normalizeStringArray(imagePlan?.failureCriteria, 3),
-    ...normalizeStringArray(usage.forbiddenSpatialRelations, 3),
-    ...normalizeStringArray(productBlueprint.mounting?.forbidden, 2)
-  ].filter((item, index, source) => source.indexOf(item) === index).slice(0, 6)
-  const lines = [
-    'Create one commercially usable Amazon product usage image at ' + resolution + '.',
-    'Canonical strategy to execute faithfully: ' + executionHint + '.',
-    'Product truth: ' + (summarizeProductTruth(productBlueprint).join(' | ') || 'preserve the complete product exactly as shown in the primary reference') + '.',
-    'The primary product reference controls product identity, shape, proportions, colors, parts, and connections. Supporting references cannot redesign the product.',
-    formatReferenceRoles(referenceImageRoles) ? 'Reference image order: ' + formatReferenceRoles(referenceImageRoles) + '.' : '',
-    'Use mode: ' + (usage.useMode || productBlueprint.mounting?.mountType || 'realistic normal use') + '.',
-    'Support object: ' + (normalizeStringArray(usage.supportObject, 8).join(' | ') || normalizeStringArray(productBlueprint.mounting?.supportSurface, 8).join(' | ') || 'the real support described by the strategy') + '.',
-    'Contact point and geometry: ' + (normalizeStringArray(usage.contactPoint, 8).join(' | ') || productBlueprint.mounting?.connectionType || 'show a valid physical contact') + '.',
-    'Spatial relationships: ' + (normalizeStringArray(usage.spatialRelationship, 10).join(' | ') || normalizeStringArray(productBlueprint.mounting?.relationship, 10).join(' | ') || 'show a physically valid placement') + '.',
-    'Functional direction: ' + (normalizeStringArray(usage.effectDirection, 8).join(' | ') || 'show the product acting toward its intended target') + '.',
-    'Success is visible only when: ' + (successCriteria.join(' | ') || 'the real use relationship is immediately understandable') + '.',
-    'Reject the image if it shows: ' + (failureCriteria.join(' | ') || 'penetration, fusion, floating parts, broken connections, or impossible support') + '.',
-    'Respect solid-object collision, gravity, continuous connections, plausible support, and correct front/back and inside/outside relationships.',
-    getExactCopyInstruction(listing, imagePlan),
-    'Keep all text and props away from the product body and any contact or mounting point.'
-  ]
-
-  if (imagePlan?.layout) lines.push('Required scene composition: ' + cleanPromptText(imagePlan.layout) + '.')
-  if (strategyConstraints.length > 0) {
-    lines.push('Additional hard constraints: ' + strategyConstraints.slice(0, 4).join(' | ') + '.')
-  }
-
-  return buildPromptWithLimit(lines, [], 'Photorealistic, physically believable, clean Amazon-ready composition.')
 }
 
 function createTransparentMaskPng(width, height) {
@@ -885,28 +837,23 @@ function buildPromptWithLimit(coreSections = [], optionalSections = [], suffix =
 }
 
 export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
-  const sourcePrompt = plan?.strategyBody || plan?.prompt || plan?.promptHint || ''
-  const promptEn = plan?.executionPrompt || plan?.executionPromptEn || plan?.promptEn || plan?.englishPrompt || ''
-  const isCompositePrompt = /Global rules:|Product blueprint:|Create one conversion-focused Amazon product image/i.test(promptEn)
+  const sourcePrompt = plan?.strategyContent || plan?.strategyBody || plan?.prompt || ''
+  const promptEn = plan?.promptEn || plan?.englishPrompt || ''
 
-  if (promptEn && !plan.promptDirty && !isCompositePrompt) {
+  if (promptEn && !plan.promptDirty) {
     return {
       ...plan,
       originalPrompt: sourcePrompt,
       prompt: promptEn,
-      executionPrompt: promptEn,
-      executionPromptEn: promptEn,
-      promptHint: plan.promptHint || sourcePrompt
+      promptEn
     }
   }
 
   if (!containsChinese(sourcePrompt)) {
     return {
       ...plan,
-      promptHint: plan.promptHint || sourcePrompt,
       prompt: sourcePrompt,
-      executionPrompt: sourcePrompt,
-      executionPromptEn: sourcePrompt
+      promptEn: sourcePrompt
     }
   }
 
@@ -930,8 +877,6 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
       originalPrompt: sourcePrompt,
       prompt: cachedTranslation,
       promptEn: cachedTranslation,
-      executionPrompt: cachedTranslation,
-      executionPromptEn: cachedTranslation,
       promptDirty: false
     }
   }
@@ -985,22 +930,18 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
     throw new Error('中文策略自动翻译失败：翻译接口没有返回英文 prompt')
   }
 
-  return {
-    ...plan,
-    originalPrompt: sourcePrompt,
-    promptHint: plan.promptHint || sourcePrompt,
-    prompt: translatedPrompt,
-    promptEn: translatedPrompt,
-    executionPrompt: translatedPrompt,
-    executionPromptEn: translatedPrompt,
-    promptDirty: false
-  }
-
-
   strategyTranslationCache.set(cacheKey, translatedPrompt)
   if (strategyTranslationCache.size > MAX_TRANSLATION_CACHE_ENTRIES) {
     const oldestKey = strategyTranslationCache.keys().next().value
     strategyTranslationCache.delete(oldestKey)
+  }
+
+  return {
+    ...plan,
+    originalPrompt: sourcePrompt,
+    prompt: translatedPrompt,
+    promptEn: translatedPrompt,
+    promptDirty: false
   }
 }
 
@@ -1015,11 +956,6 @@ export function buildAmazonPrompt(
   const taskType = imagePlan?.taskType || imagePlan?.type || 'feature'
   const productBlueprint = getProductBlueprint(listing)
   const visualBlueprint = getVisualBlueprint(imagePlan, taskType)
-  const selectedTypographyStyle = getTypographyStyle(listing?.fontPreference)
-  const strategyConstraints = normalizeStringArray(
-    Array.isArray(imagePlan?.constraints) ? imagePlan.constraints : imagePlan?.hardConstraints,
-    12
-  )
   const executionHint = getExecutionHint(imagePlan)
 
   if (taskType === 'main') {
@@ -1033,101 +969,48 @@ export function buildAmazonPrompt(
     )
   }
 
-  if (taskType === 'scenario' || taskType === 'steps') {
-    return buildUsageScenePrompt(
-      listing,
-      imagePlan,
-      productBlueprint,
-      visualBlueprint,
-      resolution,
-      primaryReferenceImageUrl,
-      referenceImageRoles
-    )
-  }
-
-  const strategyText = [
-    executionHint,
-    imagePlan?.strategyBody,
-    imagePlan?.prompt,
-    imagePlan?.goal,
-    imagePlan?.focus,
-    imagePlan?.layout
-  ].filter(Boolean).join(' ')
-  const needsUsageGeometry = /(mount|clamp|clip|install|attach|grip|support|hang|夹|安装|固定|悬挂|支撑|接触)/i.test(strategyText)
-  const successCriteria = normalizeStringArray(imagePlan?.successCriteria, 3)
-  const failureCriteria = normalizeStringArray(imagePlan?.failureCriteria, 3)
-
+  const truthFacts = summarizeProductTruth(productBlueprint)
+  const visibleEvidence = normalizeStringArray(
+    [
+      ...(productBlueprint.structure?.visibleEvidence || []),
+      ...(productBlueprint.usage?.requiredVisibleEvidence || []),
+      ...(productBlueprint.mounting?.relationship || [])
+    ],
+    8
+  )
+  const negativeFacts = normalizeStringArray(
+    [
+      ...(productBlueprint.mounting?.forbidden || []),
+      ...(productBlueprint.usage?.forbiddenSpatialRelations || []),
+      ...productBlueprint.uncertainties
+    ],
+    8
+  )
   const coreSections = [
-    'Create one conversion-focused Amazon product image for task type ' + taskType + ' at ' + resolution + '.',
-    'Canonical strategy to execute faithfully: ' + executionHint + '.',
-    'Product truth: ' + (summarizeProductTruth(productBlueprint).join(' | ') || 'preserve the complete product exactly as shown in the primary reference') + '.',
-    'The primary product reference is the highest authority for product appearance, proportions, structure, colors, printed marks, and included parts.',
-    'Do not add, remove, merge, deform, recolor, or substitute product parts. Do not create penetration, fused geometry, floating parts, or impossible support.',
+    'Render one Amazon-ready product image at ' + resolution + '.',
+    'Use the primary product reference as the highest truth source for product identity, shape, structure, proportion, color, material appearance, and included parts.',
+    'Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, or duplicate product parts.',
+    truthFacts.length > 0 ? 'Product truth: ' + truthFacts.join(' | ') + '.' : '',
+    visibleEvidence.length > 0 ? 'Required visible evidence: ' + visibleEvidence.join(' | ') + '.' : '',
+    negativeFacts.length > 0 ? 'Never show: ' + negativeFacts.join(' | ') + '.' : '',
     formatReferenceRoles(referenceImageRoles) ? 'Reference image order: ' + formatReferenceRoles(referenceImageRoles) + '.' : '',
+    'Follow the strategy below exactly. Do not add new selling points, layouts, features, claims, scene logic, or text beyond what the strategy states.',
+    executionHint ? 'Strategy to execute exactly: ' + executionHint + '.' : '',
     getExactCopyInstruction(listing, imagePlan)
   ]
 
-  if (imagePlan?.layout) {
-    coreSections.push('Required product-specific composition: ' + cleanPromptText(imagePlan.layout) + '.')
+  const optionalSections = []
+  if (imagePlan?.regenerationMode) {
+    optionalSections.push('This is a regeneration request. Respect the latest edited strategy wording exactly.')
   }
-
-  if (taskType === 'dimensions' && cleanPromptText(listing?.dimensions)) {
-    coreSections.push('Use only these confirmed measurements, each shown once: ' + cleanPromptText(listing.dimensions) + '.')
-  }
-
-  if (taskType === 'detail' && normalizeStringArray(productBlueprint.appearance?.material, 6).length > 0) {
-    coreSections.push('Confirmed materials: ' + normalizeStringArray(productBlueprint.appearance.material, 6).join(' | ') + '.')
-  }
-
-  if (needsUsageGeometry) {
-    const usageRules = [
-      ...normalizeStringArray(productBlueprint.usage?.contactPoint, 2),
-      ...normalizeStringArray(productBlueprint.usage?.spatialRelationship, 2),
-      ...normalizeStringArray(productBlueprint.usage?.effectDirection, 1),
-      ...normalizeStringArray(productBlueprint.usage?.requiredVisibleEvidence, 2)
-    ].filter((item, index, source) => source.indexOf(item) === index).slice(0, 5)
-    const forbiddenUsage = [
-      ...normalizeStringArray(productBlueprint.usage?.forbiddenSpatialRelations, 3),
-      ...normalizeStringArray(productBlueprint.mounting?.forbidden, 3)
-    ].filter((item, index, source) => source.indexOf(item) === index).slice(0, 4)
-
-    if (usageRules.length > 0) coreSections.push('Required visible use geometry: ' + usageRules.join(' | ') + '.')
-    if (forbiddenUsage.length > 0) coreSections.push('Invalid use geometry: ' + forbiddenUsage.join(' | ') + '.')
-  }
-
-  if (strategyConstraints.length > 0) {
-    coreSections.push('Additional hard constraints: ' + strategyConstraints.slice(0, 4).join(' | ') + '.')
-  }
-
-  if (successCriteria.length > 0) {
-    coreSections.push('The image succeeds only when these are visibly true: ' + successCriteria.join(' | ') + '.')
-  }
-  if (failureCriteria.length > 0) {
-    coreSections.push('Reject the image if it shows: ' + failureCriteria.join(' | ') + '.')
-  }
-  if (listing?.brandColorMode === 'manual' && listing?.brandColor) {
-    coreSections.push('Use accent color ' + listing.brandColor + ' only in layout graphics, never to recolor the product.')
-  }
-
-  if (cleanPromptText(listing?.designNotes)) {
-    coreSections.push('User design preference: ' + cleanPromptText(listing.designNotes).slice(0, 500) + '.')
-  }
-
-  if (complexity === 'L1') {
-    coreSections.push('Visual density only: restrained layout, one dominant message, generous clarity. Do not shorten or ignore the strategy.')
-  } else if (complexity === 'L2') {
-    coreSections.push('Visual density only: balanced information with clear hierarchy and realistic presentation.')
-  } else if (complexity === 'L3') {
-    coreSections.push('Visual density only: refined premium presentation while preserving immediate readability and product realism.')
-  }
-
-  coreSections.push('Typography style: ' + selectedTypographyStyle + '. Keep text outside the product and preserve clear visual hierarchy.')
-  coreSections.push('Visual guardrails: ' + visualBlueprint.lighting + '; ' + visualBlueprint.background + '. The canonical strategy controls the composition.')
+  optionalSections.push(
+    'Visual template: camera ' + visualBlueprint.camera + ', composition ' + visualBlueprint.composition + ', crop ' + visualBlueprint.crop + ', lighting ' + visualBlueprint.lighting + '.'
+  )
 
   return buildPromptWithLimit(
     coreSections,
-    [],
-    'High quality, sharp product detail, believable photography, Amazon-ready readability.'
+    optionalSections,
+    'Photorealistic, sharp product detail, clean composition, believable physical relationships, Amazon-ready readability.'
   )
 }
 

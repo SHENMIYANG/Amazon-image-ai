@@ -1,6 +1,6 @@
 import { getSelectedImageTasks } from './imageTasks'
 
-const TITLE_LABELS = ['title', 'product name', 'productname', '产品名', '产品名称', '标题']
+const TITLE_LABELS = ['title', 'product name', 'productname', '产品名称', '标题']
 
 const SECTION_ALIASES = {
   productName: TITLE_LABELS,
@@ -33,7 +33,7 @@ const SECTION_ALIASES = {
 function normalizeSectionLabel(label = '') {
   return String(label)
     .toLowerCase()
-    .replace(/[【】\[\]()（）:：\s-]/g, '')
+    .replace(/[【】\[\]()（）:\s-]/g, '')
 }
 
 export function extractProductName(listingInfo) {
@@ -198,27 +198,23 @@ export function buildPlanPayload(plan = {}) {
     type: plan.type,
     taskType: plan.taskType,
     taskKey: plan.taskKey,
+    imageRole: plan.imageRole,
+    buyerQuestion: plan.buyerQuestion,
+    primarySellingPoint: plan.primarySellingPoint,
     purpose: plan.purpose,
     goal: plan.goal,
     layout: plan.layout,
     focus: plan.focus,
-    visualFocus: plan.visualFocus,
     textDensity: plan.textDensity,
     style: plan.style,
     visualKeywords: plan.visualKeywords,
     constraints: plan.constraints,
     hardConstraints: plan.hardConstraints,
-    successCriteria: plan.successCriteria,
-    failureCriteria: plan.failureCriteria,
     copy: plan.copy,
     allowTextOverlay: plan.allowTextOverlay,
     visualBlueprint: plan.visualBlueprint,
-    strategyBody: plan.strategyBody || plan.prompt,
-    promptHint: plan.promptHint,
-    prompt: plan.prompt,
+    strategyContent: plan.strategyContent || plan.strategyBody || plan.prompt,
     promptEn: plan.promptEn,
-    executionPrompt: plan.executionPrompt,
-    executionPromptEn: plan.executionPromptEn,
     promptDirty: plan.promptDirty ? true : undefined,
     regenerationMode: plan.regenerationMode ? true : undefined
   })
@@ -236,11 +232,12 @@ export function buildGenerateRequest(
   const regenerationReferenceSet = new Set(regenerationReferenceImages)
   const referenceImageRoles = referenceImages.map((url) => ({
     url,
-    role: url === primaryReferenceImageUrl
-      ? 'primary_product'
-      : regenerationReferenceSet.has(url)
-        ? 'regeneration_reference'
-        : 'supporting_product'
+    role:
+      url === primaryReferenceImageUrl
+        ? 'primary_product'
+        : regenerationReferenceSet.has(url)
+          ? 'regeneration_reference'
+          : 'supporting_product'
   }))
 
   return compactObject({

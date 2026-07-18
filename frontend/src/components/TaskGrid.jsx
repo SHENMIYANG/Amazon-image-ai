@@ -180,7 +180,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
       imageIndex,
       imageId: image.imageId,
       imageName: image.name || '',
-      prompt: image.prompt || '',
+      prompt: image.strategyContent || image.prompt || '',
       referenceFile: null,
       referencePreviewUrl: ''
     })
@@ -290,10 +290,10 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                 </div>
               ) : null}
 
-              {image.prompt ? (
+              {image.strategyContent ? (
                 <div className="image-prompt-display">
                   <strong>当前中文策略</strong>
-                  <p>{image.prompt}</p>
+                  <p>{image.strategyContent}</p>
                 </div>
               ) : null}
 

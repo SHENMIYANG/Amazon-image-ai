@@ -202,29 +202,28 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       taskType: task.taskType,
       taskKey: task.taskKey,
       type: task.taskType,
+      imageRole: existing?.imageRole || '',
+      buyerQuestion: existing?.buyerQuestion || '',
+      primarySellingPoint: existing?.primarySellingPoint || '',
       purpose: task.description,
       blueprint: task.blueprint,
       goal: existing?.goal || '',
       layout: existing?.layout || '',
       focus: existing?.focus || '',
-      visualFocus: existing?.visualFocus || '',
       textDensity: existing?.textDensity || '',
       style: existing?.style || '',
       visualKeywords: existing?.visualKeywords || [],
       constraints: existing?.constraints || [],
       hardConstraints: existing?.hardConstraints || [],
-      successCriteria: existing?.successCriteria || [],
-      failureCriteria: existing?.failureCriteria || [],
       copy: existing?.copy || [],
       allowTextOverlay: Boolean(existing?.allowTextOverlay),
       visualBlueprint: existing?.visualBlueprint || null,
-      promptHint: existing?.promptHint || '',
-      strategyBody: existing?.strategyBody || (hasPromptValue ? existing.prompt : task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : ''),
-      prompt: hasPromptValue ? existing.prompt : task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : '',
+      strategyContent:
+        existing?.strategyContent ||
+        existing?.strategyBody ||
+        (hasPromptValue ? existing.prompt : task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : ''),
       placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
       promptEn: existing?.promptEn || '',
-      executionPrompt: existing?.executionPrompt || '',
-      executionPromptEn: existing?.executionPromptEn || '',
       promptDirty: existing?.promptDirty || false
     }
   })

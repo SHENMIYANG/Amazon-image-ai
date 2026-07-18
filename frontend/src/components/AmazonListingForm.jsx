@@ -71,7 +71,14 @@ function getAdditionalInfoPlaceholder() {
 【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`
 }
 
-export default function AmazonListingForm({ listing, onChange, analyzer, mode = 'full' }) {
+export default function AmazonListingForm({
+  listing,
+  onChange,
+  analyzer,
+  mode = 'full',
+  onSaveStrategyTranslation,
+  savingStrategyTranslations = {}
+}) {
   const [expandedEditor, setExpandedEditor] = useState(null)
   const showProductSection = mode === 'full' || mode === 'product'
   const showStrategySection = mode === 'full' || mode === 'strategy'
@@ -100,6 +107,7 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
         plan.id === imageId
           ? {
               ...plan,
+              strategyContent: prompt,
               strategyBody: prompt,
               promptHint: prompt,
               prompt,
@@ -304,31 +312,58 @@ export default function AmazonListingForm({ listing, onChange, analyzer, mode = 
               <div className="image-plans-empty">请先选择至少 1 张要生成的图片任务。</div>
             ) : (
               <div className="image-plans-grid image-plans-grid--full">
-                {imagePlans.map((plan) => (
-                  <div
-                    key={plan.id}
-                    className={`form-group image-plan-group ${plan.taskType === 'main' ? 'image-plan-group--hero' : ''}`}
-                  >
-                    <div className="image-plan-label">
-                      <div className="image-plan-heading">
-                        <span className="image-badge">{`图 ${plan.id}`}</span>
-                        <span className="image-type">{plan.name}</span>
+                {imagePlans.map((plan) => {
+                  const isSaving = Boolean(savingStrategyTranslations?.[plan.id])
+                  const hasStrategy = Boolean(String(plan.strategyContent || plan.prompt || '').trim())
+                  const englishStatus =
+                    plan.taskType === 'main'
+                      ? '主图固定英文稿'
+                      : plan.promptDirty
+                        ? '英文执行稿待更新'
+                        : plan.promptEn
+                          ? '英文执行稿已保存'
+                          : '未生成英文执行稿'
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`form-group image-plan-group ${plan.taskType === 'main' ? 'image-plan-group--hero' : ''}`}
+                    >
+                      <div className="image-plan-label">
+                        <div className="image-plan-heading">
+                          <span className="image-badge">{`图 ${plan.id}`}</span>
+                          <span className="image-type">{plan.name}</span>
+                        </div>
+                        {plan.purpose ? <span className="image-plan-purpose">{plan.purpose}</span> : null}
                       </div>
-                      {plan.purpose ? <span className="image-plan-purpose">{plan.purpose}</span> : null}
-                    </div>
 
-                    <div className="image-plan-strategy-meta">
-                      <span className="image-plan-strategy-tag">中文策略正文</span>
-                    </div>
+                      <div className="image-plan-strategy-meta">
+                        <span className="image-plan-strategy-tag">中文策略正文</span>
+                        <span className="strategy-english-status">{englishStatus}</span>
+                      </div>
 
-                    <textarea
-                      value={plan.prompt || ''}
-                      placeholder={plan.placeholder || ''}
-                      onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
-                      rows={plan.taskType === 'main' ? 6 : 8}
-                    />
-                  </div>
-                ))}
+                      <textarea
+                        value={plan.strategyContent || plan.prompt || ''}
+                        placeholder={plan.placeholder || ''}
+                        onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
+                        rows={plan.taskType === 'main' ? 6 : 8}
+                      />
+
+                      {plan.taskType !== 'main' ? (
+                        <div className="image-plan-actions">
+                          <button
+                            type="button"
+                            className="editor-modal-btn editor-modal-btn--ghost image-plan-save-btn"
+                            onClick={() => onSaveStrategyTranslation?.(plan.id)}
+                            disabled={!hasStrategy || isSaving}
+                          >
+                            {isSaving ? '保存中...' : '保存本图英文执行稿'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

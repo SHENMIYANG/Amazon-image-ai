@@ -754,6 +754,30 @@
   font-weight: 700;
 }
 
+.strategy-english-status {
+  color: #6b7280;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.image-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.55rem;
+}
+
+.image-plan-save-btn {
+  min-height: 30px;
+  padding: 0.38rem 0.8rem;
+  font-size: 0.74rem;
+  border-radius: 9px;
+}
+
+.image-plan-save-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
   .image-plan-label {
     align-items: flex-start;
