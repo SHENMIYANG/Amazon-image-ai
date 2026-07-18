@@ -15,6 +15,7 @@ backend/test-*.js
 backend/test-*.html
 backend/check-*.js
 backend/generate-template-examples.js
+!backend/test-generation-pipeline.js
 
 # Environment variables (DO NOT commit API keys)
 .env
