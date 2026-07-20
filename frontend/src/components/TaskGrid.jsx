@@ -2,6 +2,11 @@ import { useMemo, useState } from 'react'
 import './TaskGrid.css'
 
 const MAX_REFERENCE_SIZE = 10 * 1024 * 1024
+const REGENERATE_COMPLEXITY_OPTIONS = [
+  { value: 'L1', label: 'L1 极速版' },
+  { value: 'L2', label: 'L2 标准版' },
+  { value: 'L3', label: 'L3 精品版' }
+]
 
 function Icon({ name }) {
   const commonProps = {
@@ -180,7 +185,8 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
       imageIndex,
       imageId: image.imageId,
       imageName: image.name || '',
-      prompt: image.strategyContent || image.prompt || '',
+      prompt: image.strategyContent || '',
+      complexity: task?.listing?.complexity || 'L1',
       referenceFile: null,
       referencePreviewUrl: ''
     })
@@ -230,6 +236,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
 
     onRegenerate(task, regenerateDialog.imageIndex, {
       prompt,
+      complexity: regenerateDialog.complexity || 'L1',
       referenceFiles: regenerateDialog.referenceFile ? [regenerateDialog.referenceFile] : []
     })
     closeRegenerateDialog()
@@ -396,6 +403,30 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                   value={regenerateDialog.prompt}
                   onChange={(event) => setRegenerateDialog((value) => ({ ...value, prompt: event.target.value }))}
                 />
+              </label>
+
+              <label className="regenerate-field">
+                <span>本次出图复杂度</span>
+                <select
+                  className="regenerate-select"
+                  value={regenerateDialog.complexity}
+                  onChange={(event) =>
+                    setRegenerateDialog((value) =>
+                      value
+                        ? {
+                            ...value,
+                            complexity: event.target.value
+                          }
+                        : value
+                    )
+                  }
+                >
+                  {REGENERATE_COMPLEXITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div className="regenerate-reference">

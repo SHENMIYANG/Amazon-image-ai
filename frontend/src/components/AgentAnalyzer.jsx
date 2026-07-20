@@ -6,6 +6,31 @@ import './AgentAnalyzer.css'
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+async function waitForUploadedReference(url, maxAttempts = 8, delayMs = 350) {
+  let lastError = null
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${url}?probe=${Date.now()}-${attempt}`, {
+        method: 'HEAD',
+        cache: 'no-store'
+      })
+
+      if (response.ok) {
+        return true
+      }
+
+      lastError = new Error(`HEAD ${response.status}`)
+    } catch (error) {
+      lastError = error
+    }
+
+    await wait(delayMs)
+  }
+
+  throw lastError || new Error('上传图片文件尚未就绪')
+}
+
 async function requestAnalysis(listing, referenceImages, primaryReferenceImageUrl) {
   const response = await fetch('/api/agent-analyze', {
     method: 'POST',
@@ -19,7 +44,17 @@ async function requestAnalysis(listing, referenceImages, primaryReferenceImageUr
 }
 
 async function settleUploadedFiles() {
-  await wait(600)
+  await wait(250)
+}
+
+async function settleUploadedReferences(referenceImages = []) {
+  const targets = Array.isArray(referenceImages) ? referenceImages.filter(Boolean).slice(0, 3) : []
+  if (targets.length === 0) {
+    await settleUploadedFiles()
+    return
+  }
+
+  await Promise.all(targets.map((url) => waitForUploadedReference(url)))
 }
 
 export default function AgentAnalyzer({
@@ -96,7 +131,7 @@ export default function AgentAnalyzer({
 
         uploadedReferenceImages = uploadData.images.map((img) => img.url)
         onReferenceImagesChange?.(uploadedReferenceImages)
-        await settleUploadedFiles()
+        await settleUploadedReferences(uploadedReferenceImages)
       }
 
       const explicitPrimaryReferenceImageUrl = primaryReferenceImageUrl || uploadedReferenceImages[0] || ''

@@ -30,7 +30,8 @@ router.post('/', async (req, res) => {
       primaryReferenceImageUrl,
       referenceImageRoles,
       complexity,
-      productBlueprint
+      productBlueprint,
+      executionContext
     } = req.body
 
     if (!listing || !imagePlans || imagePlans.length === 0) {
@@ -40,12 +41,27 @@ router.post('/', async (req, res) => {
       })
     }
 
-    const executionListing = {
-      ...listing,
-      productBlueprint: productBlueprint || listing.productBlueprint
-    }
+    const {
+      executionListing,
+      executionPlans,
+      executionResolution,
+      executionReferenceImages,
+      executionPrimaryReferenceImageUrl,
+      executionReferenceImageRoles,
+      executionComplexity
+    } = normalizeExecutionRequest({
+      listing,
+      imagePlans,
+      resolution,
+      referenceImages,
+      primaryReferenceImageUrl,
+      referenceImageRoles,
+      complexity,
+      productBlueprint,
+      executionContext
+    })
 
-    const hasReferenceImages = referenceImages && referenceImages.length > 0
+    const hasReferenceImages = executionReferenceImages && executionReferenceImages.length > 0
 
     const apiKey = process.env.IMAGE_GEN_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl = process.env.IMAGE_GEN_BASE_URL || process.env.OPENAI_BASE_URL
@@ -70,20 +86,21 @@ router.post('/', async (req, res) => {
       })
     }
 
-    const size = resolution === '4k' ? '4096x4096' : '2048x2048'
-    const explicitPrimaryReferenceImageUrl = primaryReferenceImageUrl || referenceImages?.[0] || ''
+    const size = executionResolution === '4k' ? '4096x4096' : '2048x2048'
+    const explicitPrimaryReferenceImageUrl =
+      executionPrimaryReferenceImageUrl || executionReferenceImages?.[0] || ''
 
     let refImagePaths = []
     let orderedReferenceRoles = []
     if (hasReferenceImages) {
       const roleByUrl = new Map(
-        (Array.isArray(referenceImageRoles) ? referenceImageRoles : [])
+        (Array.isArray(executionReferenceImageRoles) ? executionReferenceImageRoles : [])
           .filter((item) => item?.url)
           .map((item) => [item.url, item.role])
       )
       const candidateReferenceImages = [
         explicitPrimaryReferenceImageUrl,
-        ...referenceImages.filter((imageUrl) => imageUrl && imageUrl !== explicitPrimaryReferenceImageUrl)
+        ...executionReferenceImages.filter((imageUrl) => imageUrl && imageUrl !== explicitPrimaryReferenceImageUrl)
       ].filter(Boolean).filter((imageUrl, index, source) => source.indexOf(imageUrl) === index)
       const referencePriority = (imageUrl) => {
         if (imageUrl === explicitPrimaryReferenceImageUrl) return 0
@@ -92,7 +109,7 @@ router.post('/', async (req, res) => {
       }
       const orderedReferenceImages = candidateReferenceImages
         .sort((left, right) => referencePriority(left) - referencePriority(right))
-        .slice(0, 8)
+        .slice(0, 4)
 
       refImagePaths = orderedReferenceImages.map((imageUrl) => resolveUploadPathFromUrl(imageUrl))
       orderedReferenceRoles = orderedReferenceImages.map((imageUrl, index) => ({
@@ -111,24 +128,29 @@ router.post('/', async (req, res) => {
 
     const generatedImages = []
 
-    for (const plan of imagePlans) {
+    for (const plan of executionPlans) {
       try {
         const taskType = plan.taskType || plan.type || 'feature'
         const normalizedPlan = taskType === 'main' && !plan.regenerationMode
-          ? { ...plan, originalPrompt: plan.strategyContent || plan.strategyBody || plan.prompt || '' }
+          ? { ...plan, originalPrompt: plan.strategyContent || '' }
           : await translatePlanPromptIfNeeded(plan, executionListing, size)
         const prompt = buildAmazonPrompt(
           executionListing,
           normalizedPlan,
-          complexity || 'L2',
+          executionComplexity || 'L2',
           size,
           explicitPrimaryReferenceImageUrl,
           orderedReferenceRoles
         )
+        const taskReferenceAssets = selectReferenceAssetsForTask({
+          taskType,
+          refImagePaths,
+          orderedReferenceRoles
+        })
 
         const generatedImage = await callGPTImage2({
           prompt,
-          refImagePaths: hasReferenceImages ? refImagePaths : [],
+          refImagePaths: hasReferenceImages ? taskReferenceAssets.refImagePaths : [],
           size,
           apiKey,
           baseUrl,
@@ -149,9 +171,9 @@ router.post('/', async (req, res) => {
           primarySellingPoint: plan.primarySellingPoint || null,
           imageUrl: generatedImage.imageUrl,
           prompt,
-          promptEn: normalizedPlan.promptEn || normalizedPlan.prompt || '',
+          promptEn: normalizedPlan.promptEn || '',
           executionPromptEn: prompt,
-          promptZh: normalizedPlan.originalPrompt || plan.strategyContent || plan.prompt || '',
+          promptZh: normalizedPlan.originalPrompt || plan.strategyContent || '',
           status: 'completed',
           resolution: size,
           actualWidth: generatedImage.width,
@@ -174,7 +196,7 @@ router.post('/', async (req, res) => {
           prompt: buildAmazonPrompt(
             executionListing,
             plan,
-            complexity || 'L2',
+            executionComplexity || 'L2',
             size,
             explicitPrimaryReferenceImageUrl,
             orderedReferenceRoles
@@ -308,6 +330,84 @@ function formatGenerateError(err) {
   }
 
   return rawMessage
+}
+
+function normalizeExecutionRequest({
+  listing = {},
+  imagePlans = [],
+  resolution = '2k',
+  referenceImages = [],
+  primaryReferenceImageUrl = '',
+  referenceImageRoles = [],
+  complexity = 'L2',
+  productBlueprint,
+  executionContext
+} = {}) {
+  const executionProduct = executionContext?.product && typeof executionContext.product === 'object'
+    ? executionContext.product
+    : {}
+  const executionStrategy = executionContext?.strategy && typeof executionContext.strategy === 'object'
+    ? executionContext.strategy
+    : null
+  const executionReferences = executionContext?.references && typeof executionContext.references === 'object'
+    ? executionContext.references
+    : {}
+  const executionOutput = executionContext?.output && typeof executionContext.output === 'object'
+    ? executionContext.output
+    : {}
+
+  const executionListing = {
+    ...listing,
+    ...executionProduct,
+    productBlueprint:
+      executionProduct.productBlueprint ||
+      productBlueprint ||
+      listing.productBlueprint
+  }
+
+  const executionPlans = executionStrategy
+    ? [
+        {
+          ...imagePlans[0],
+          ...executionStrategy,
+          type: executionStrategy.taskType || executionStrategy.type || imagePlans[0]?.type,
+          taskType: executionStrategy.taskType || executionStrategy.type || imagePlans[0]?.taskType
+        }
+      ]
+    : imagePlans
+
+  return {
+    executionListing,
+    executionPlans,
+    executionResolution: executionOutput.resolution || resolution || '2k',
+    executionReferenceImages: Array.isArray(executionReferences.referenceImages)
+      ? executionReferences.referenceImages
+      : referenceImages,
+    executionPrimaryReferenceImageUrl:
+      executionReferences.primaryReferenceImageUrl || primaryReferenceImageUrl || '',
+    executionReferenceImageRoles: Array.isArray(executionReferences.referenceImageRoles)
+      ? executionReferences.referenceImageRoles
+      : referenceImageRoles,
+    executionComplexity: executionOutput.complexity || executionProduct.complexity || complexity || 'L2'
+  }
+}
+
+function selectReferenceAssetsForTask({ taskType = 'feature', refImagePaths = [], orderedReferenceRoles = [] } = {}) {
+  if (!Array.isArray(refImagePaths) || refImagePaths.length === 0) {
+    return { refImagePaths: [], orderedReferenceRoles: [] }
+  }
+
+  if (taskType === 'main') {
+    return {
+      refImagePaths: [refImagePaths[0]].filter(Boolean),
+      orderedReferenceRoles: orderedReferenceRoles.slice(0, 1)
+    }
+  }
+
+  return {
+    refImagePaths,
+    orderedReferenceRoles
+  }
 }
 
 function readImageDimensions(buffer) {
@@ -602,11 +702,11 @@ function cleanPromptText(value = '') {
 
 function getExecutionHint(imagePlan = {}) {
   const reusableEnglishPrompt = !imagePlan.promptDirty
-    ? cleanPromptText(imagePlan.promptEn || imagePlan.englishPrompt)
+    ? cleanPromptText(imagePlan.promptEn)
     : ''
   if (reusableEnglishPrompt) return reusableEnglishPrompt
 
-  return cleanPromptText(imagePlan.strategyContent || imagePlan.strategyBody || imagePlan.prompt || '')
+  return cleanPromptText(imagePlan.strategyContent || '')
 }
 
 function normalizeLineList(value = '', maxItems = 6, maxItemLength = 160) {
@@ -837,8 +937,8 @@ function buildPromptWithLimit(coreSections = [], optionalSections = [], suffix =
 }
 
 export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
-  const sourcePrompt = plan?.strategyContent || plan?.strategyBody || plan?.prompt || ''
-  const promptEn = plan?.promptEn || plan?.englishPrompt || ''
+  const sourcePrompt = plan?.strategyContent || ''
+  const promptEn = plan?.promptEn || ''
 
   if (promptEn && !plan.promptDirty) {
     return {
@@ -955,7 +1055,6 @@ export function buildAmazonPrompt(
 ) {
   const taskType = imagePlan?.taskType || imagePlan?.type || 'feature'
   const productBlueprint = getProductBlueprint(listing)
-  const visualBlueprint = getVisualBlueprint(imagePlan, taskType)
   const executionHint = getExecutionHint(imagePlan)
 
   if (taskType === 'main') {
@@ -963,7 +1062,7 @@ export function buildAmazonPrompt(
       listing,
       imagePlan,
       productBlueprint,
-      visualBlueprint,
+      getVisualBlueprint(imagePlan, taskType),
       resolution,
       primaryReferenceImageUrl
     )
@@ -987,30 +1086,31 @@ export function buildAmazonPrompt(
     8
   )
   const coreSections = [
-    'Render one Amazon-ready product image at ' + resolution + '.',
+    'Render one square Amazon-ready product image at ' + resolution + '.',
     'Use the primary product reference as the highest truth source for product identity, shape, structure, proportion, color, material appearance, and included parts.',
-    'Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, or duplicate product parts.',
-    truthFacts.length > 0 ? 'Product truth: ' + truthFacts.join(' | ') + '.' : '',
-    visibleEvidence.length > 0 ? 'Required visible evidence: ' + visibleEvidence.join(' | ') + '.' : '',
-    negativeFacts.length > 0 ? 'Never show: ' + negativeFacts.join(' | ') + '.' : '',
+    'Generate the image from scratch but keep the same real product. Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, duplicate, or omit product parts.',
+    truthFacts.length > 0 ? 'Confirmed product truth: ' + truthFacts.join(' | ') + '.' : '',
+    visibleEvidence.length > 0 ? 'Visible proof that must appear: ' + visibleEvidence.join(' | ') + '.' : '',
+    negativeFacts.length > 0 ? 'Hard visual exclusions: ' + negativeFacts.join(' | ') + '.' : '',
     formatReferenceRoles(referenceImageRoles) ? 'Reference image order: ' + formatReferenceRoles(referenceImageRoles) + '.' : '',
-    'Follow the strategy below exactly. Do not add new selling points, layouts, features, claims, scene logic, or text beyond what the strategy states.',
-    executionHint ? 'Strategy to execute exactly: ' + executionHint + '.' : '',
+    'Treat the following strategy as the single execution truth. Do not add new meaning, new selling points, new layout logic, new scene logic, or new claims beyond it.',
+    executionHint ? 'Execute this strategy exactly: ' + executionHint + '.' : '',
     getExactCopyInstruction(listing, imagePlan)
   ]
 
-  const optionalSections = []
-  if (imagePlan?.regenerationMode) {
-    optionalSections.push('This is a regeneration request. Respect the latest edited strategy wording exactly.')
-  }
-  optionalSections.push(
-    'Visual template: camera ' + visualBlueprint.camera + ', composition ' + visualBlueprint.composition + ', crop ' + visualBlueprint.crop + ', lighting ' + visualBlueprint.lighting + '.'
-  )
+  const optionalSections = [
+    taskType === 'detail'
+      ? 'A detail image may zoom in, but visible product structure and material truth must still remain correct.'
+      : 'Keep the product visually complete and recognizable. Do not crop away key structure, accessories, controller, cable, clamp, base, or other major parts unless the strategy explicitly asks for a tight detail crop.',
+    imagePlan?.regenerationMode
+      ? 'This is a regeneration request. Respect the latest edited strategy wording exactly.'
+      : ''
+  ]
 
   return buildPromptWithLimit(
     coreSections,
     optionalSections,
-    'Photorealistic, sharp product detail, clean composition, believable physical relationships, Amazon-ready readability.'
+    'Photorealistic, sharp product detail, believable physical relationships, Amazon-ready readability.'
   )
 }
 

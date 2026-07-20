@@ -1,6 +1,5 @@
 ﻿import { useState, useEffect, useRef } from 'react'
 import AmazonListingForm from './components/AmazonListingForm'
-import ComplexitySelector from './components/ComplexitySelector'
 import ProductImageUploader from './components/ProductImageUploader'
 import TaskGrid from './components/TaskGrid'
 import GenerateButton from './components/GenerateButton'
@@ -109,7 +108,7 @@ function buildImageVersionSnapshot(image = {}) {
 
   return {
     imageUrl: image.imageUrl,
-    strategyContent: image.strategyContent || image.prompt || '',
+    strategyContent: image.strategyContent || '',
     promptEn: image.promptEn || '',
     actualResolution: image.actualResolution || null,
     requestedResolution: image.requestedResolution || null,
@@ -136,6 +135,23 @@ function buildInvalidatedAnalysisState(prev, { preservePlans = true } = {}) {
   }
 }
 
+function normalizeTaskConfigForComparison(config = {}) {
+  const base = getDefaultImageTaskConfig()
+  return Object.keys(base).reduce((acc, key) => {
+    const rawValue = config?.[key]
+    const count = Number.isFinite(Number(rawValue)) ? Number(rawValue) : base[key]
+    acc[key] = Math.max(0, Math.min(6, Math.round(count)))
+    return acc
+  }, {})
+}
+
+function isTaskConfigReductionOnly(previousConfig = {}, nextConfig = {}) {
+  const prev = normalizeTaskConfigForComparison(previousConfig)
+  const next = normalizeTaskConfigForComparison(nextConfig)
+
+  return Object.keys(prev).every((key) => next[key] <= prev[key])
+}
+
 const ANALYSIS_INVALIDATING_FIELDS = new Set([
   'productName',
   'category',
@@ -150,7 +166,7 @@ const ANALYSIS_INVALIDATING_FIELDS = new Set([
   'brandColorMode',
   'brandColor',
   'designNotes',
-  'selectedImageTasks'
+  'complexity'
 ])
 
 function App() {
@@ -170,7 +186,7 @@ function App() {
     brandColor: '',
     designNotes: '',
     additionalInfo: '',
-    complexity: 'L1',
+    complexity: 'L2',
     globalRules: null,
     globalConstraints: null,
     productBlueprint: null,
@@ -257,6 +273,26 @@ function App() {
       return
     }
 
+    if (field === 'selectedImageTasks') {
+      setListing((prev) => {
+        const reductionOnly = isTaskConfigReductionOnly(prev.selectedImageTasks, value)
+
+        if (reductionOnly) {
+          return {
+            ...prev,
+            selectedImageTasks: value
+          }
+        }
+
+        return {
+          ...prev,
+          ...buildInvalidatedAnalysisState(prev),
+          selectedImageTasks: value
+        }
+      })
+      return
+    }
+
     if (ANALYSIS_INVALIDATING_FIELDS.has(field)) {
       setListing((prev) => ({
         ...prev,
@@ -276,7 +312,7 @@ function App() {
       strategyContent:
         (plan.taskType || plan.type) === 'main'
           ? MAIN_IMAGE_FIXED_RULE
-          : plan.strategyContent || plan.strategyBody || plan.prompt || '',
+          : plan.strategyContent || '',
       imageRole: plan.imageRole || '',
       buyerQuestion: plan.buyerQuestion || '',
       primarySellingPoint: plan.primarySellingPoint || '',
@@ -425,7 +461,7 @@ function App() {
         copy: plan.copy || [],
         allowTextOverlay: Boolean(plan.allowTextOverlay),
         visualBlueprint: plan.visualBlueprint || null,
-        strategyContent: plan.strategyContent || plan.strategyBody || plan.prompt || '',
+        strategyContent: plan.strategyContent || '',
         promptEn: plan.promptEn || '',
         promptDirty: plan.promptDirty || false,
         versions: [],
@@ -534,7 +570,7 @@ function App() {
                           buyerQuestion: generatedImage.buyerQuestion || img.buyerQuestion || '',
                           primarySellingPoint: generatedImage.primarySellingPoint || img.primarySellingPoint || '',
                           error: null,
-                          strategyContent: generatedImage.promptZh || img.strategyContent || img.prompt,
+                          strategyContent: generatedImage.promptZh || img.strategyContent || '',
                           promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                           promptDirty: false,
                           versions: img.versions || [],
@@ -617,9 +653,10 @@ function App() {
     const image = task.images[imageIndex]
     if (!image || image.status === 'generating') return
 
-    const requestedPrompt = String(options.prompt ?? image.strategyContent ?? image.prompt ?? '').trim()
+    const requestedPrompt = String(options.prompt ?? image.strategyContent ?? '').trim()
+    const requestedComplexity = String(options.complexity || task?.listing?.complexity || listing.complexity || 'L2').trim()
     const referenceFiles = Array.isArray(options.referenceFiles) ? options.referenceFiles.slice(0, 1) : []
-    const strategyChanged = requestedPrompt !== String(image.strategyContent || image.prompt || '').trim()
+    const strategyChanged = requestedPrompt !== String(image.strategyContent || '').trim()
     
     const planToUse = {
       id: image.imageId,
@@ -679,7 +716,10 @@ function App() {
     }))
     
     try {
-      const taskListing = task.listing || buildListingPayload(listing, { includeGenerationSettings: true })
+      const taskListing = {
+        ...(task.listing || buildListingPayload(listing, { includeGenerationSettings: true })),
+        complexity: requestedComplexity
+      }
       const primaryReferenceImageUrl =
         task.primaryReferenceImageUrl || getPrimaryReferenceImageUrl(task.referenceImages || [])
       const additionalReferenceImages = await uploadReferenceFiles(
@@ -737,6 +777,7 @@ function App() {
                     regenerationError: null,
                     lastRegeneration: {
                       strategy: requestedPrompt,
+                      complexity: requestedComplexity,
                       baseReferenceCount: (task.referenceImages || []).length,
                       addedReferenceCount: additionalReferenceImages.length,
                       usedReferenceCount: regenerationReferenceImages.length,
@@ -826,7 +867,7 @@ function App() {
         copy: img.copy || [],
         allowTextOverlay: Boolean(img.allowTextOverlay),
         visualBlueprint: img.visualBlueprint || null,
-        strategyContent: img.strategyContent || img.strategyBody || img.prompt || '',
+        strategyContent: img.strategyContent || '',
         promptEn: img.promptEn,
         promptDirty: img.promptDirty
       }))
@@ -912,7 +953,7 @@ function App() {
                     buyerQuestion: generatedImage.buyerQuestion || img.buyerQuestion || '',
                     primarySellingPoint: generatedImage.primarySellingPoint || img.primarySellingPoint || '',
                     error: null,
-                    strategyContent: generatedImage.promptZh || img.strategyContent || img.strategyBody || img.prompt,
+                    strategyContent: generatedImage.promptZh || img.strategyContent || '',
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
                     promptDirty: false,
                     versions: img.versions || [],
@@ -1096,13 +1137,6 @@ function App() {
                 <h2>开始生成</h2>
               </div>
               <div className="stack-panel-group action-panel-group">
-                <div className="sub-panel compact-sub-panel">
-                  <ComplexitySelector
-                    selected={listing.complexity}
-                    onChange={(value) => handleListingChange('complexity', value)}
-                  />
-                </div>
-
                 <div className="sub-panel compact-sub-panel">
                   <ResolutionSelector
                     selected={selectedResolution}

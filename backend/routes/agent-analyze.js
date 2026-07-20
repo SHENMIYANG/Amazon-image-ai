@@ -8,6 +8,7 @@ import {
   normalizeConfidenceValue,
   normalizeStringArray
 } from '../utils/productModel.js'
+import { translatePlanPromptIfNeeded } from './generate.js'
 import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
 import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../utils/uploads.js'
 
@@ -672,6 +673,18 @@ function defaultLayout(taskType) {
   }
 }
 
+function getComplexityDefinition(complexity = 'L1') {
+  switch (String(complexity || 'L1').trim().toUpperCase()) {
+    case 'L3':
+      return 'L3 refined mode: allow richer information hierarchy, more supporting detail, and stronger layout design, but do not repeat selling points, overload the frame, or weaken product truth.'
+    case 'L2':
+      return 'L2 standard mode: balance conversion clarity and information completeness. One image may carry one main theme plus a small amount of closely related supporting information.'
+    case 'L1':
+    default:
+      return 'L1 fast mode: prioritize simplicity, fast understanding, low text density, strong product focus, and lower error risk. Keep each image visually direct and avoid overloading it.'
+  }
+}
+
 function classifyStrategyMode(strategyTasks = []) {
   const count = strategyTasks.length
   const uniqueTypes = [...new Set(strategyTasks.map((task) => task.taskType))]
@@ -687,6 +700,18 @@ function classifyStrategyMode(strategyTasks = []) {
   return 'full_mix'
 }
 
+function extractSellingPointList(rawValue = '') {
+  return String(rawValue || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^[\d一二三四五六七八九十]+[.)、．\s-]*/, '').trim())
+    .filter(Boolean)
+    .filter((line) => line.length >= 4)
+    .filter((line, index, source) => source.indexOf(line) === index)
+    .slice(0, 12)
+}
+
 function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
   const count = strategyTasks.length
 
@@ -694,7 +719,9 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
     return [
       `This is a focused ${count}-image selling-point bundle, not a full 7-image listing set.`,
       'Prioritize the strongest distinct buying reasons first.',
+      'Distribute selling points like a shot list, not like repeated captions.',
       'Do not force summary, gift, or decorative scene roles unless the product information clearly demands them.',
+      'If selling points are more than image count, merge only naturally related benefits into the same image and keep one primary benefit plus at most one secondary benefit per image.',
       'If selling points are fewer than image count, expand with installation, usage, compatibility, fit, or material trust angles instead of repeating one benefit.',
       'Every image must feel essential to conversion.'
     ].join(' ')
@@ -704,6 +731,7 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
     return [
       `This is a compact ${count}-image conversion set.`,
       'Cover only the highest-priority buyer questions.',
+      'Treat each image as a directorial shot with a clear selling mission, not as a generic image type.',
       'Prefer strong selling reasons, installation clarity, fit or size clarity, and real-use understanding.',
       'Avoid low-value filler images.'
     ].join(' ')
@@ -715,6 +743,7 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
 
   return [
     'This is a broader Amazon listing image set.',
+    'Treat every image as a directorial execution script, not as an abstract description.',
     'Distribute image roles across different buyer decision stages: strongest benefit, second benefit, usage clarity, fit or detail clarity, and final trust reinforcement.',
     'Do not let later images mechanically repeat earlier ones.'
   ].join(' ')
@@ -728,6 +757,7 @@ router.post('/', async (req, res) => {
       category,
       marketplace,
       imageLanguage,
+      complexity = 'L1',
       dimensions,
       material,
       targetAudience,
@@ -785,6 +815,7 @@ router.post('/', async (req, res) => {
     })
     const fontStyleLabel = getFontStyleLabel(fontPreference)
     const brandColorLabel = getBrandColorLabel(brandColorMode, brandColor)
+    const complexityDefinition = getComplexityDefinition(complexity)
 
     const imageContentParts = await buildImageContentParts(explicitPrimaryReferenceImageUrl, referenceImages)
     const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY
@@ -818,6 +849,7 @@ router.post('/', async (req, res) => {
     const strategyTasks = requestedTasks.filter((task) => task.taskType !== 'main')
     const strategyMode = classifyStrategyMode(strategyTasks)
     const strategyModeInstruction = getStrategyModeInstruction(strategyMode, strategyTasks)
+    const sellingPointList = extractSellingPointList(sellingPoints || listingInfo)
     const strategyTaskDescription = strategyTasks
       .map((item, index) => [
         `Plan ${index + 1} | ${item.name}`,
@@ -829,7 +861,8 @@ router.post('/', async (req, res) => {
       .join('\n\n')
 
     const combinedSystemPrompt = `
-You are a senior Amazon listing image strategist for high-volume, non-branded products.
+You are acting as an Amazon marketplace operator, ecommerce visual planner, and English ad-copy strategist for high-volume, non-branded products.
+Your job is to understand the real product from images first, then generate Amazon-ready image strategies for the user-selected image tasks.
 Do the product understanding and the requested non-main image planning in one pass.
 Return JSON only with two top-level keys: productBlueprint and imagePlans.
 imagePlans must contain exactly ${strategyTasks.length} items in the same order as the task list.
@@ -862,32 +895,32 @@ Each image plan must include:
 
 Rules:
 1. Inspect the explicit primary image first. It is the highest authority for shape, color, proportions, structure, printed marks, accessories, and connections.
-2. Supporting product images may reveal other angles or usage, but cannot override the primary product identity.
-3. Product text explains specifications and intended use, but must not override visible product truth.
-4. List concrete visible parts, not broad groups. Include cables, controllers, connectors, jaws, handles, bulbs, buttons, fasteners, and other visually important parts when present.
-5. Describe how every major part connects to the next part as one continuous physical product.
-6. For mounted or supported products, describe exact contact geometry, inside/outside placement, force or support logic, and visible proof that makes the installation believable.
-7. Do not invent hidden geometry or package contents. Put unverified facts in uncertainties.
-8. primaryColor may not be empty when colors are visible in the references.
-9. visibleEvidence and requiredVisibleEvidence must describe what a generated image must visibly preserve, not abstract product benefits.
-10. strategyContent is the single source of truth for operators and final image execution. Write it as 4 to 6 short Chinese lines only, using this exact structure when applicable: 目标：... ; 构图：... ; 重点：... ; 文案：... ; 要求：... .
-11. Every line in strategyContent must carry unique value. Do not restate the same idea in different wording.
+2. Supporting product images may reveal other angles, missing parts, full package contents, usage setup, or structure that the main image does not fully show. Use them to complete product understanding, but do not let them override the main product identity.
+3. Layout or style references may influence composition, atmosphere, and selling presentation, but they may not change product truth.
+4. Product text explains specifications, intended use, and image requirements, and should be combined with image evidence rather than ignored.
+5. List concrete visible parts, not broad groups. Include cables, controllers, connectors, jaws, handles, bulbs, buttons, fasteners, package contents, and other visually important parts when present.
+6. Describe how every major part connects to the next part as one continuous physical product.
+7. For mounted or supported products, describe exact contact geometry, inside/outside placement, force or support logic, and visible proof that makes the installation believable.
+8. Do not invent hidden geometry or package contents. Put unverified facts in uncertainties.
+9. primaryColor may not be empty when colors are visible in the references.
+10. visibleEvidence and requiredVisibleEvidence must describe what a generated image must visibly preserve, not abstract product benefits.
+11. strategyContent is the single source of truth for operators and final image execution. Write it as operator-readable Chinese directorial strategy, not as a rigid five-line template. It must clearly cover: image objective, required product truth, scene or composition direction, allowed copy if any, and critical avoid rules.
 12. promptEn must be a faithful English execution version of strategyContent. It is translation for model execution, not a new plan. Do not add, remove, summarize, beautify, or reinterpret requirements.
-13. Use one primary purchase reason per image. Distribute selling points across plans and avoid repeating the same benefit unless product truth requires it.
-14. The image must prove the selling point visually. Do not plan invisible internal mechanisms as if they can be photographed.
-15. Use supplied usage steps, pain points, installation methods, and scene requirements when relevant. Do not replace them with generic lifestyle scenes.
-16. For products with mounting, contact, movement, or direction, describe visible geometry and success evidence precisely.
-17. Text is forbidden only for the Amazon main image, which is handled separately. Other image types may use concise text when it improves conversion or understanding.
-18. copy must come from confirmed selling points, dimensions, usage, or supplied requirements. Localize and shorten it for Amazon ${marketplace || 'UK'}, but never invent a new claim.
-19. Prefer one headline plus at most one short supporting line. Do not split one benefit into several redundant labels.
-20. Do not force repeated layout templates. Choose composition from product shape, visible evidence, and buyer question.
-21. Respect uncertainties. Do not build a strategy around an unverified variant, accessory, quantity, or performance claim.
-22. Each non-main image must answer a different buyer question and must have a different primary role within the set.
-23. Do not reuse the same primary selling point across multiple images unless the user explicitly requests repetition.
+13. Think like a director. Do not write a generic description. Specify what the model must visibly show, where it should appear, what selling mission the image serves, and what visual proof is required.
+14. Selling-point allocation should adapt to product type, selected tasks, image count, and complexity. Core product function has priority over secondary emotional or decorative value. Show the main functional buying reason first, then supporting benefits. Do not force one selling point per image. For gift sets, bundles, kits, and multi-piece products, one image may carry a core theme plus several naturally related items or benefits when helpful.
+15. The image must prove the selling point visually. Do not plan invisible internal mechanisms as if they can be photographed.
+16. Use supplied usage steps, pain points, installation methods, explicit image requirements, and scene requirements when relevant. If the user already described "main image", "feature image 1/2/3", "scene image", or similar roles, treat those as partially specified image duties and respect them.
+17. For products with mounting, contact, movement, or direction, describe visible geometry and success evidence precisely.
+18. Text is forbidden only for the Amazon main image, which is handled separately. Other image types may use concise text when it improves conversion or understanding.
+19. copy must come from confirmed selling points, dimensions, usage, or supplied requirements. Localize and shorten it for Amazon ${marketplace || 'UK'}, but never invent a new claim. Copy is not limited to one short line; choose none, one headline, or a compact headline plus supporting line according to the image mission and complexity.
+20. If readable quantity, dimensions, or package-content text is clearly visible in the supplied reference images, you may extract and use it conservatively. Do not guess unreadable text. Do not invent measurements or counts that are not clearly confirmed by images or product text.
+21. Do not force repeated layout templates. Choose composition from product shape, visible evidence, buyer question, reference images, and complexity.
+22. Respect uncertainties. Do not build a strategy around an unverified variant, accessory, quantity, or performance claim.
+23. Each non-main image should answer a different buyer question and play a different role within the set unless the user explicitly requests repetition.
 24. If only 3 to 5 feature images are requested, treat the set as a focused conversion bundle rather than a full listing sequence.
-25. When image count is limited, prioritize strong buying reasons, installation or usage clarity, compatibility or fit, and trust-building detail before low-value filler content.
+25. When image count is limited, prioritize the strongest buying reasons, true use understanding, fit or size clarity, package completeness, and trust-building detail before filler content.
 26. Scene images must prove real use context. They may not exist only for mood, beauty, or decoration.
-27. Dimension images must focus on size, fit, clearance, scale, or compatibility and must not repeat feature-copy as their core message.
+27. Dimension images must focus on size, fit, clearance, scale, package completeness, or compatibility and must not repeat feature-copy as their core message.
 28. Steps or installation images must focus on how the product is used, mounted, attached, or operated and must not duplicate feature-image duties.
 29. Summary images must reinforce value or trust and must not mechanically restate previous image roles.
 `.trim()
@@ -901,12 +934,15 @@ Dimensions: ${trimForModel(dimensions || 'Not provided', 900)}
 Material: ${trimForModel(material || 'Not provided', 1200)}
 Target Audience: ${trimForModel(targetAudience || 'Not provided', 900)}
 Selling Points: ${trimForModel(sellingPoints, 3500)}
+Detected Selling Point List: ${trimForModel(JSON.stringify(sellingPointList), 1800)}
 Full Listing Source: ${trimForModel(listingInfo || 'Not provided', 7000)}
 Usage, scenes, and supplementary requirements: ${trimForModel(additionalInfo || 'None', 7000)}
 Custom Design Notes: ${trimForModel(designNotes || 'None', 600)}
 Known text signals: ${JSON.stringify(productSignals)}
 Font Preference: ${fontStyleLabel}
 Brand Color Preference: ${brandColorLabel}
+Complexity: ${complexity}
+Complexity Definition: ${complexityDefinition}
 
 Requested non-main image tasks
 ${strategyTaskDescription || 'No non-main image tasks requested.'}
@@ -916,6 +952,9 @@ ${strategyMode}
 
 Planning rule
 ${strategyModeInstruction}
+
+Selling point allocation note
+There are ${sellingPointList.length} detected selling points for ${strategyTasks.length} non-main requested images. You must consciously decide how to distribute them across shots. Do not repeat points mechanically. Do not leave major confirmed selling points unused when the requested image count can still cover them through smart grouping. Let complexity influence information density, text density, and how many closely related ideas one image can responsibly carry.
 `.trim()
 
     const combinedCompletion = await createAgentCompletion(openai, {
@@ -980,7 +1019,7 @@ ${strategyModeInstruction}
       const normalizedFocus = String(
         plan.focus || (requestedTask.taskType === 'main' ? '完整产品主体' : '当前图片核心卖点')
       ).trim()
-      const strategyContent = String(plan.strategyContent || plan.strategyBody || plan.prompt || '').trim()
+      const strategyContent = String(plan.strategyContent || '').trim()
 
       const allowTextOverlay = Boolean(plan.allowTextOverlay)
 
@@ -994,8 +1033,8 @@ ${strategyModeInstruction}
         buyerQuestion: String(plan.buyerQuestion || '').trim(),
         primarySellingPoint: String(plan.primarySellingPoint || plan.focus || '').trim(),
         purpose: String(plan.purpose || requestedTask.purpose).trim(),
-        goal: String(plan.goal || defaultGoal(requestedTask.taskType)).trim(),
-        layout: String(plan.layout || defaultLayout(requestedTask.taskType)).trim(),
+        goal: String(plan.goal || '').trim() || defaultGoal(requestedTask.taskType),
+        layout: String(plan.layout || '').trim() || defaultLayout(requestedTask.taskType),
         focus: normalizedFocus,
         textDensity: String(plan.textDensity || '').trim(),
         style: String(plan.style || '').trim(),
@@ -1006,21 +1045,67 @@ ${strategyModeInstruction}
         allowTextOverlay,
         strategyContent,
         visualBlueprint: normalizeVisualBlueprint({}, requestedTask.taskType),
-        promptEn: String(plan.promptEn || plan.englishPrompt || '').trim(),
+        promptEn: String(plan.promptEn || '').trim(),
         promptDirty: false
       }
     })
 
+    const translationListing = {
+      productName,
+      listingInfo,
+      category,
+      marketplace: marketplace || 'UK',
+      imageLanguage: marketplaceLanguage,
+      dimensions,
+      material,
+      targetAudience,
+      additionalInfo,
+      designNotes,
+      fontPreference,
+      brandColorMode,
+      brandColor,
+      sellingPoints,
+      productBlueprint
+    }
+
+    const completedPlans = await Promise.all(
+      normalizedPlans.map(async (plan) => {
+        if (plan.taskType === 'main') return plan
+        if (String(plan.promptEn || '').trim()) return plan
+        if (!String(plan.strategyContent || '').trim()) return plan
+
+        try {
+          const translatedPlan = await translatePlanPromptIfNeeded(
+            {
+              ...plan,
+              promptDirty: true
+            },
+            translationListing,
+            '2048x2048'
+          )
+
+          return {
+            ...plan,
+            promptEn: String(translatedPlan.promptEn || '').trim(),
+            promptDirty: false
+          }
+        } catch (translationError) {
+          console.warn('[agent-analyze] promptEn backfill failed for', plan.taskKey || plan.name, translationError.message)
+          return plan
+        }
+      })
+    )
+
     const responseData = {
       productBlueprint,
-      imagePlans: normalizedPlans,
-        _meta: {
-          requestedImageCount: requestedTasks.length,
-          productUnderstandingWarnings: [],
-          productUnderstandingNeedsReview: false,
-          productUnderstandingRepaired: false,
-          generatedAt: new Date().toISOString()
-        }
+      imagePlans: completedPlans,
+      _meta: {
+        requestedImageCount: requestedTasks.length,
+        productUnderstandingWarnings: [],
+        productUnderstandingNeedsReview: false,
+        productUnderstandingRepaired: false,
+        generatedAt: new Date().toISOString()
+      }
     }
 
     res.json({

@@ -6,7 +6,7 @@ const router = express.Router()
 router.post('/', async (req, res) => {
   try {
     const { listing, plan, resolution } = req.body || {}
-    const strategyContent = String(plan?.strategyContent || plan?.strategyBody || plan?.prompt || '').trim()
+    const strategyContent = String(plan?.strategyContent || '').trim()
 
     if (!listing || !strategyContent) {
       return res.status(400).json({
@@ -23,7 +23,7 @@ router.post('/', async (req, res) => {
       listing,
       resolution || '2048x2048'
     )
-    const promptEn = normalizedPlan.promptEn || normalizedPlan.prompt || ''
+    const promptEn = normalizedPlan.promptEn || ''
     const executionPromptEn = buildAmazonPrompt(
       listing,
       normalizedPlan,

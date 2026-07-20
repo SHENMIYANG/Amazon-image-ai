@@ -33,7 +33,7 @@ const SECTION_ALIASES = {
 function normalizeSectionLabel(label = '') {
   return String(label)
     .toLowerCase()
-    .replace(/[【】\[\]()（）:\s-]/g, '')
+    .replace(/[【】\[\]()（）:：\s-]/g, '')
 }
 
 export function extractProductName(listingInfo) {
@@ -50,7 +50,6 @@ export function extractProductName(listingInfo) {
   )
 
   const titleLine = lines.find((line) => titleMatcher.test(line))
-
   if (titleLine) {
     return titleLine.replace(titleMatcher, '').trim().slice(0, 200)
   }
@@ -60,7 +59,6 @@ export function extractProductName(listingInfo) {
 
 function resolveSectionField(label = '') {
   const normalizedLabel = normalizeSectionLabel(label)
-
   return Object.entries(SECTION_ALIASES).find(([, aliases]) =>
     aliases.some((alias) => normalizedLabel.includes(normalizeSectionLabel(alias)))
   )?.[0]
@@ -72,6 +70,7 @@ export function compactObject(source) {
       if (value === undefined || value === null) return false
       if (typeof value === 'string') return value.trim() !== ''
       if (Array.isArray(value)) return value.length > 0
+      if (typeof value === 'object') return Object.keys(value).length > 0
       return true
     })
   )
@@ -86,27 +85,20 @@ export function parseListingInfoSections(listingInfo = '') {
   const flush = () => {
     if (!currentField) return
     const value = buffer.join('\n').trim()
-    if (value) {
-      result[currentField] = value
-    }
+    if (value) result[currentField] = value
   }
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
-
     if (!line) {
-      if (currentField && buffer.length > 0) {
-        buffer.push('')
-      }
+      if (currentField && buffer.length > 0) buffer.push('')
       continue
     }
 
     const separatorIndex = Math.max(line.indexOf('：'), line.indexOf(':'))
-
     if (separatorIndex > -1) {
       const label = line.slice(0, separatorIndex)
       const field = resolveSectionField(label)
-
       if (field) {
         flush()
         currentField = field
@@ -116,9 +108,7 @@ export function parseListingInfoSections(listingInfo = '') {
       }
     }
 
-    if (currentField) {
-      buffer.push(line)
-    }
+    if (currentField) buffer.push(line)
   }
 
   flush()
@@ -163,6 +153,52 @@ export function buildListingPayload(source = {}, { includeGenerationSettings = f
   return compactObject(payload)
 }
 
+function buildExecutionProductContext(source = {}) {
+  const listing = buildListingPayload(source, { includeGenerationSettings: true, stripAnalysisArtifacts: true })
+
+  return compactObject({
+    productName: listing.productName,
+    category: listing.category,
+    marketplace: listing.marketplace,
+    imageLanguage: listing.imageLanguage,
+    fontPreference: listing.fontPreference,
+    brandColorMode: listing.brandColorMode,
+    brandColor: listing.brandColor,
+    complexity: listing.complexity,
+    productBlueprint: source.productBlueprint || undefined
+  })
+}
+
+function buildExecutionStrategyContext(plan = {}) {
+  return compactObject({
+    id: plan.id,
+    name: plan.name,
+    taskType: plan.taskType || plan.type,
+    strategyContent: plan.strategyContent,
+    promptEn: plan.promptEn,
+    promptDirty: plan.promptDirty ? true : undefined,
+    constraints: plan.constraints,
+    hardConstraints: plan.hardConstraints,
+    copy: plan.copy,
+    allowTextOverlay: plan.allowTextOverlay,
+    visualBlueprint: plan.visualBlueprint,
+    regenerationMode: plan.regenerationMode ? true : undefined
+  })
+}
+
+function buildReferenceImageRoles(referenceImages = [], primaryReferenceImageUrl = '', regenerationReferenceImages = []) {
+  const regenerationReferenceSet = new Set(regenerationReferenceImages)
+  return referenceImages.map((url) => ({
+    url,
+    role:
+      url === primaryReferenceImageUrl
+        ? 'primary_product'
+        : regenerationReferenceSet.has(url)
+          ? 'regeneration_reference'
+          : 'supporting_product'
+  }))
+}
+
 export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryReferenceImageUrl = '') {
   const parsedSections = parseListingInfoSections(listing.listingInfo || listing.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(listing.selectedImageTasks)
@@ -185,6 +221,7 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     dimensions: listing.dimensions || parsedSections.dimensions,
     material: listing.material || parsedSections.material,
     targetAudience: listing.targetAudience || parsedSections.targetAudience,
+    complexity: listing.complexity || 'L2',
     selectedImageTasks,
     referenceImages,
     primaryReferenceImageUrl
@@ -198,24 +235,14 @@ export function buildPlanPayload(plan = {}) {
     type: plan.type,
     taskType: plan.taskType,
     taskKey: plan.taskKey,
-    imageRole: plan.imageRole,
-    buyerQuestion: plan.buyerQuestion,
-    primarySellingPoint: plan.primarySellingPoint,
-    purpose: plan.purpose,
-    goal: plan.goal,
-    layout: plan.layout,
-    focus: plan.focus,
-    textDensity: plan.textDensity,
-    style: plan.style,
-    visualKeywords: plan.visualKeywords,
+    strategyContent: plan.strategyContent,
+    promptEn: plan.promptEn,
+    promptDirty: plan.promptDirty ? true : undefined,
     constraints: plan.constraints,
     hardConstraints: plan.hardConstraints,
     copy: plan.copy,
     allowTextOverlay: plan.allowTextOverlay,
     visualBlueprint: plan.visualBlueprint,
-    strategyContent: plan.strategyContent || plan.strategyBody || plan.prompt,
-    promptEn: plan.promptEn,
-    promptDirty: plan.promptDirty ? true : undefined,
     regenerationMode: plan.regenerationMode ? true : undefined
   })
 }
@@ -229,25 +256,39 @@ export function buildGenerateRequest(
   regenerationReferenceImages = []
 ) {
   const complexity = sourceListing.complexity || 'L2'
-  const regenerationReferenceSet = new Set(regenerationReferenceImages)
-  const referenceImageRoles = referenceImages.map((url) => ({
-    url,
-    role:
-      url === primaryReferenceImageUrl
-        ? 'primary_product'
-        : regenerationReferenceSet.has(url)
-          ? 'regeneration_reference'
-          : 'supporting_product'
-  }))
+  const referenceImageRoles = buildReferenceImageRoles(
+    referenceImages,
+    primaryReferenceImageUrl,
+    regenerationReferenceImages
+  )
 
   return compactObject({
-    listing: buildListingPayload(sourceListing, { stripAnalysisArtifacts: true }),
+    listing: compactObject({
+      productName: sourceListing.productName,
+      marketplace: sourceListing.marketplace || 'UK',
+      imageLanguage: sourceListing.imageLanguage,
+      category: sourceListing.category,
+      productBlueprint: sourceListing.productBlueprint
+    }),
     imagePlans: [buildPlanPayload(plan)],
     complexity,
     resolution,
     referenceImages,
     primaryReferenceImageUrl,
     referenceImageRoles,
-    productBlueprint: sourceListing.productBlueprint
+    productBlueprint: sourceListing.productBlueprint,
+    executionContext: {
+      product: buildExecutionProductContext(sourceListing),
+      strategy: buildExecutionStrategyContext(plan),
+      references: compactObject({
+        primaryReferenceImageUrl,
+        referenceImages,
+        referenceImageRoles
+      }),
+      output: compactObject({
+        resolution,
+        complexity
+      })
+    }
   })
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import GenerationPreferences from './GenerationPreferences'
+import ComplexitySelector from './ComplexitySelector'
 import {
   IMAGE_TASK_OPTIONS,
   buildDefaultPlansFromTasks,
@@ -44,9 +45,8 @@ function plansSignature(plans = []) {
       taskKey: plan.taskKey,
       taskType: plan.taskType,
       name: plan.name,
-      prompt: plan.prompt,
+      strategyContent: plan.strategyContent,
       placeholder: plan.placeholder,
-      promptHint: plan.promptHint,
       promptDirty: plan.promptDirty
     }))
   )
@@ -108,12 +108,8 @@ export default function AmazonListingForm({
           ? {
               ...plan,
               strategyContent: prompt,
-              strategyBody: prompt,
-              promptHint: prompt,
               prompt,
               promptEn: '',
-              executionPrompt: '',
-              executionPromptEn: '',
               promptDirty: true
             }
           : plan
@@ -275,6 +271,11 @@ export default function AmazonListingForm({
             </div>
           </div>
 
+          <ComplexitySelector
+            selected={listing.complexity || 'L1'}
+            onChange={(value) => onChange('complexity', value)}
+          />
+
           {analyzer && <div className="strategy-analyzer-slot">{analyzer}</div>}
 
           {(listing.listingInfo || listing.additionalInfo) && (
@@ -314,7 +315,7 @@ export default function AmazonListingForm({
               <div className="image-plans-grid image-plans-grid--full">
                 {imagePlans.map((plan) => {
                   const isSaving = Boolean(savingStrategyTranslations?.[plan.id])
-                  const hasStrategy = Boolean(String(plan.strategyContent || plan.prompt || '').trim())
+                  const hasStrategy = Boolean(String(plan.strategyContent || '').trim())
                   const englishStatus =
                     plan.taskType === 'main'
                       ? '主图固定英文稿'
@@ -343,7 +344,7 @@ export default function AmazonListingForm({
                       </div>
 
                       <textarea
-                        value={plan.strategyContent || plan.prompt || ''}
+                        value={plan.strategyContent || ''}
                         placeholder={plan.placeholder || ''}
                         onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
                         rows={plan.taskType === 'main' ? 6 : 8}
