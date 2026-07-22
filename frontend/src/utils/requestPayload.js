@@ -174,14 +174,13 @@ function buildExecutionStrategyContext(plan = {}) {
     id: plan.id,
     name: plan.name,
     taskType: plan.taskType || plan.type,
+    imageRole: plan.imageRole,
+    sellingFocus: plan.sellingFocus || plan.primarySellingPoint,
     strategyContent: plan.strategyContent,
     promptEn: plan.promptEn,
     promptDirty: plan.promptDirty ? true : undefined,
-    constraints: plan.constraints,
-    hardConstraints: plan.hardConstraints,
+    executionRules: plan.executionRules || plan.constraints,
     copy: plan.copy,
-    allowTextOverlay: plan.allowTextOverlay,
-    visualBlueprint: plan.visualBlueprint,
     regenerationMode: plan.regenerationMode ? true : undefined
   })
 }
@@ -202,6 +201,10 @@ function buildReferenceImageRoles(referenceImages = [], primaryReferenceImageUrl
 export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryReferenceImageUrl = '') {
   const parsedSections = parseListingInfoSections(listing.listingInfo || listing.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(listing.selectedImageTasks)
+  const referenceImageRoles = referenceImages.map((url) => ({
+    url,
+    role: url === primaryReferenceImageUrl ? 'primary_product' : 'supporting_product'
+  }))
 
   return compactObject({
     productName:
@@ -224,7 +227,8 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     complexity: listing.complexity || 'L2',
     selectedImageTasks,
     referenceImages,
-    primaryReferenceImageUrl
+    primaryReferenceImageUrl,
+    referenceImageRoles
   })
 }
 
@@ -235,14 +239,13 @@ export function buildPlanPayload(plan = {}) {
     type: plan.type,
     taskType: plan.taskType,
     taskKey: plan.taskKey,
+    imageRole: plan.imageRole,
+    sellingFocus: plan.sellingFocus || plan.primarySellingPoint,
     strategyContent: plan.strategyContent,
     promptEn: plan.promptEn,
     promptDirty: plan.promptDirty ? true : undefined,
-    constraints: plan.constraints,
-    hardConstraints: plan.hardConstraints,
+    executionRules: plan.executionRules || plan.constraints,
     copy: plan.copy,
-    allowTextOverlay: plan.allowTextOverlay,
-    visualBlueprint: plan.visualBlueprint,
     regenerationMode: plan.regenerationMode ? true : undefined
   })
 }

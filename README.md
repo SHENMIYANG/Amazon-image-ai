@@ -1,419 +1,409 @@
-# Amazon Image AI 🚀
+# Amazon Image Studio
 
-亚马逊电商图片 AI 生成工具 - 基于 GPT-Image-2 和营销策略库自动生成高质量商品主图
+面向亚马逊铺货场景的商品套图生成工具。
 
-![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)
-![React](https://img.shields.io/badge/React-18-blue.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+这个项目的核心目标不是“直接让模型乱画”，而是把产品图、产品资料、运营要求先整理成可执行策略，再交给 `gpt-image-2` 生成更稳定的 Amazon 主图 / 副图。
 
-## ✨ 核心功能
+## 项目定位
 
-- 📝 **智能 Listing 表单** - 3 步填写产品信息（产品→卖点→策略）
-- 🎨 **7 种营销策略** - 通用基础/卖点聚焦/信息图/生活方式/科技感/高端奢华/时尚
--  **3 级复杂度控制** - L1 极速版/L2 标准版/L3 精品版，灵活控制成本
-- 🤖 **AI 智能分析** - 一键生成 7 张图片的详细视觉策略
-- 🔍 **合规检查** - 自动检测图片是否符合亚马逊平台规范
--  **拖拽上传** - 支持拖拽上传产品图，自动压缩优化
-- ️ **API 配置** - 支持 OpenAI 及兼容接口，灵活配置
+适合这类工作流：
 
-## 📸 效果预览
+1. 上传产品主图和辅助参考图
+2. 填写 Listing、卖点、使用方式、场景补充、国家语言等信息
+3. AI 先理解产品，再按你选定的图片类型生成中文策略
+4. 运营检查中文策略，必要时手动改
+5. 系统保存对应英文执行稿
+6. 按单张策略调用生图接口
+7. 支持单张重生、补参考图、继续生成、下载结果
 
-![产品界面](./docs/screenshot.png)
+它更像一个“商品图策略工作台”，而不是单纯的 Prompt 输入框。
 
-## 🚀 快速开始
+## 当前功能
 
-### 方式一：AI 编程工具一键安装（推荐）
+### 1. 产品素材输入
 
-如果你使用 **Codex / Claude Code / OpenClaw** 等 AI 编程工具，直接复制以下指令：
+- 最多上传 `8` 张图片
+- 支持设置一张主图作为产品真实性最高依据
+- 其余参考图用于补充角度、结构、使用方式、竞品版式、氛围风格
+- 上传后通过后端 `/api/upload` 落盘，前端会等待上传资源可访问后再发分析请求
 
+### 2. 商品信息输入
+
+前端统一收集这些信息：
+
+- `listingInfo`
+- `additionalInfo`
+- `marketplace`
+- `imageLanguage`
+- `fontPreference`
+- `brandColorMode` / `brandColor`
+- `complexity`
+- `selectedImageTasks`
+
+其中 `listingInfo` 和 `additionalInfo` 是当前项目最核心的业务输入。
+
+### 3. 图片任务规划
+
+当前支持的图片类型：
+
+- 主图 `main`
+- 卖点图 `feature`
+- 场景图 `scenario`
+- 细节图 `detail`
+- 尺寸图 `dimensions`
+- 步骤图 `steps`
+- 对比图 `comparison`
+- 包装图 `package`
+- 总结图 `summary`
+
+每种类型都可以单独设置张数，系统会根据你实际勾选的任务生成对应数量的策略，不再强制固定 7 张。
+
+### 4. AI 策略生成
+
+`/api/agent-analyze` 会基于：
+
+- 主图
+- 辅助参考图
+- 产品资料
+- 图片任务类型
+- 出图复杂度
+
+生成两类结果：
+
+- `productBlueprint`：产品理解层
+- `imagePlans[]`：每张图的中文策略 + 英文执行稿
+
+其中：
+
+- 中文 `strategyContent` 是运营可读、可修改的唯一策略正文
+- 英文 `promptEn` 是对应这张图的执行稿
+- 主图有固定的 Amazon 主图规则，不走自由发挥
+
+### 5. 生图执行
+
+`/api/generate` 的职责是执行，不重新做业务决策。
+
+当前代码已经在往这个方向收敛：
+
+- 主图按固定白底 Amazon 规则执行
+- 非主图尽量按当前 `strategyContent / promptEn` 执行
+- 支持单张重新生成
+- 单张重生时可以补 1 张额外参考图
+- 支持 `L1 / L2 / L3` 复杂度
+- 分辨率支持 `2K / 4K` 选项
+
+### 6. 英文执行稿同步
+
+项目当前是“双轨策略”：
+
+- 运营看中文策略
+- 模型执行英文策略
+
+如果 `agent-analyze` 阶段已经生成了英文稿，后续直接生图不会再重复翻译。
+
+只有这些情况下，前端才会再次请求 `/api/prompt-preview`：
+
+- 某张图的中文策略被手动改过
+- 该图 `promptEn` 缺失
+- 该图被标记为 `promptDirty`
+
+## 当前工作流
+
+详见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，这里先给最实用版本：
+
+```text
+上传产品图 + 填资料
+    ↓
+AI 分析产品，生成 productBlueprint 和每张图的中文/英文策略
+    ↓
+运营查看中文策略
+    ↓
+如果要改，改单张策略并保存英文执行稿
+    ↓
+开始生图
+    ↓
+如果某张不满意，单张重生，可补参考图
 ```
-请把这个 GitHub 项目安装到我的本地电脑并启动：
-https://github.com/SHENMIYANG/Amazon-image-ai
 
-要求：
-1. 先确认本机已经安装 Node.js 20 LTS 或更新版本和 npm
-2. 如果本地还没有项目，就 clone 仓库；如果已经下载 ZIP 或源码文件夹，直接进入现有项目目录
-3. 在项目目录运行 npm ci 安装依赖
-4. 如果我是 Windows 用户，优先检查仓库里的 start-amazon-image-studio.bat，能用的话帮我用它启动项目
-5. 如果不使用 bat 脚本，就运行 npm run dev 启动项目
-6. 告诉我浏览器应该打开哪个本地地址
+这个流程是当前项目的主流程，后续改功能也建议尽量围绕这条链路扩展，而不是再回到“超长 Prompt 一把梭”。
+
+## 技术栈
+
+### 前端
+
+- React 18
+- Vite 5
+- 原生 CSS
+
+### 后端
+
+- Node.js 20+
+- Express 4
+- Multer
+- Sharp
+- Axios
+
+### 模型与接口
+
+- 图像生成：`gpt-image-2` 兼容接口
+- 策略分析：`AGENT_*` 指向的文本模型接口
+
+## 目录结构
+
+```text
+.
+├─ frontend/                     # React + Vite 前端
+│  ├─ src/
+│  │  ├─ components/            # 表单、上传、分析、结果区组件
+│  │  ├─ utils/                 # 请求载荷、图片任务、表单解析等
+│  │  ├─ App.jsx                # 主页面入口
+│  │  └─ main.jsx
+│  └─ package.json
+├─ backend/                      # Express 后端
+│  ├─ routes/
+│  │  ├─ upload.js              # 图片上传
+│  │  ├─ agent-analyze.js       # 产品理解 + 策略生成
+│  │  ├─ prompt-preview.js      # 单张策略英文执行稿同步
+│  │  ├─ generate.js            # 生图执行
+│  │  └─ testApiKey.js          # 接口配置测试
+│  ├─ utils/
+│  ├─ server.js
+│  └─ package.json
+├─ docs/
+│  ├─ API.md
+│  ├─ ARCHITECTURE.md
+│  ├─ DEPLOYMENT.md
+│  ├─ GENERATION_RULES.md
+│  └─ SERVER_QUICK_DEPLOY.md
+├─ ecosystem.config.js
+├─ docker-compose.yml
+└─ README.md
 ```
 
-### 方式二：手动安装（通用）
+## 本地开发
 
-#### 1. 环境要求
+### 环境要求
 
-- **Node.js**: 20 LTS 或更高版本
-- **npm**: 9.0+（随 Node.js 一起安装）
-- **操作系统**: Windows 10/11, macOS 10.15+, Linux
+- Node.js `>= 20`
+- npm `>= 9`
 
-检查 Node.js 版本：
+### 安装依赖
+
 ```bash
-node --version  # 应该显示 v20.x.x 或更高
-npm --version   # 应该显示 9.x.x 或更高
-```
-
-#### 2. 下载项目
-
-**选项 A - Git Clone（推荐）**
-```bash
-git clone https://github.com/SHENMIYANG/Amazon-image-ai.git
-cd Amazon-image-ai
-```
-
-**选项 B - 下载 ZIP**
-- 点击仓库页面的 **Code** → **Download ZIP**
-- 解压到任意目录
-- 打开终端进入项目目录
-
-#### 3. 安装依赖
-
-```bash
-# 安装依赖（首次运行）
 npm ci
+cd frontend && npm ci
+cd ../backend && npm ci
 ```
 
-#### 4. 配置 API Key
+### 启动开发环境
 
-项目启动后，在浏览器页面右上角点击 **⚙️ 设置图标**，填写你的 API 配置：
+在项目根目录：
 
-- **API Endpoint**: `https://api.openai.com/v1`（或兼容接口）
-- **API Key**: `sk-proj-xxxxxxxxxxxxx`
-- **Model**: `gpt-image-2`
-
-> ⚠️ **重要提示**: 不要将你的 API Key 分享给他人！每个使用者需要配置自己的 Key。
-
-#### 5. 启动项目
-
-**Windows 用户**：
-```bash
-# 双击运行（自动检查环境 + 安装依赖 + 启动）
-start-amazon-image-studio.bat
-```
-
-**macOS / Linux 用户**：
-```bash
-chmod +x start-amazon-image-studio.sh
-./start-amazon-image-studio.sh
-```
-
-**通用方式**：
 ```bash
 npm run dev
 ```
 
->  **提示**：
-> - `start-amazon-image-studio.bat` / `start-amazon-image-studio.sh` - 完整启动（自动检查环境 + 安装依赖）
-> - `stop-amazon-image-studio.bat` - 停止服务（关闭所有 Node 进程）
+默认会同时启动：
 
-#### 6. 访问应用
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:3001`
+- 健康检查：`http://localhost:3001/api/health`
 
-浏览器打开：**http://localhost:5173**
-
----
-
-## 📖 使用说明
-
-### 第一步：上传产品图（必需）
-
-- 点击或拖拽上传产品图片
-- 支持多张（不同角度）
-- 自动压缩优化到 1920x1920 以内
-
-### 第二步：填写产品信息
-
-**1. 产品信息**
-- 产品名称（必需）
-- 所属类目（可选）
-- 售卖国家/市场（可选）
-- 尺寸规格（可选）
-- 材质/工艺（可选）
-
-**2. 核心卖点**
-- 目标受众（可选）
-- 核心卖点（必需，每行一个，最多 5 个）
-- 补充信息（可选，使用步骤/场景要求等）
-
-### 第三步：选择营销策略
-
-从 7 种营销策略中选择：
-- **🎯 通用基础型 (Basic)** - 最通用，适合大多数产品
-- **🔥 卖点聚焦型 (Feature Focus)** - 突出核心卖点，适合功能创新产品
-- **📊 信息图表型 (Infographic)** - 数据密集展示，适合参数复杂产品
-- ** 生活方式型 (Lifestyle)** - 场景化展示，适合家居/服装
-- **⚡ 科技感型 (Technical)** - 未来感视觉，适合数码/科技产品
-- **💎 高端奢华型 (Premium)** - 精致高级感，适合奢侈品
-- **👗 时尚潮流型 (Fashion)** - 时尚视觉，适合服装/配饰
-
-### 第四步：选择复杂度
-
-- **L1 极速版** - 简洁卖点 + 白底 + 简短文字（低成本）
-- **L2 标准版** - 平衡质量和成本（推荐）
-- **L3 精品版** - 极致详细 + 信息图 + 情绪化场景（高质量）
-
-### 第五步：AI 分析生成策略
-
-1. 点击 **"✨ 一键生成套图策略"**
-2. AI 会根据产品信息生成 7 张图片的详细策略
-3. 包含：构图、场景、色彩、文案、图标等
-4. 可手动调整任何一张图的策略
-
-### 第六步：生成图片
-
-1. 点击 **"🚀 生成 7 张图片"**
-2. 等待 AI 逐张生成（实时预览）
-3. 生成完成后可下载单张或全部
-
----
-
-## ️ 部署方案
-
-### 方案一：开发环境（本地使用）
-
-按照上面的"快速开始"步骤即可。
-
-### 方案二：生产环境（团队共享）
-
-#### PM2 部署（推荐）
+### 单独启动
 
 ```bash
-# 1. 构建前端
-cd frontend
-npm install
-npm run build
-
-# 2. 安装 PM2
-npm install -g pm2
-
-# 3. 配置环境变量
-cd ../backend
-# 编辑 .env 文件，设置：
-# IMAGE_GEN_API_KEY=sk-xxxxx
-# NODE_ENV=production
-
-# 4. 启动服务
-cd ..
-pm2 start ecosystem.config.js
-pm2 startup
-pm2 save
-
-# 5. 访问
-# http://localhost:3001
+npm run dev:frontend
+npm run dev:backend
 ```
 
-#### Docker 部署
+## 生产启动
+
+### PM2
+
+项目内已经有 `ecosystem.config.js`：
 
 ```bash
-# 一键启动
+pm2 start ecosystem.config.js
+pm2 restart ecommerce-image-gen
+pm2 logs ecommerce-image-gen
+```
+
+PM2 配置当前默认：
+
+- 应用名：`ecommerce-image-gen`
+- 运行目录：`./backend`
+- 端口：`3001`
+- 模式：`production`
+
+### Docker
+
+```bash
 docker-compose up -d
-
-# 查看日志
 docker-compose logs -f
-
-# 停止服务
 docker-compose down
 ```
 
-### 方案三：云部署
+## 环境变量
 
-支持部署到以下平台：
-- **Vercel** - 前端 + Serverless 函数
-- **Railway** - 一键部署
-- **Render** - 免费额度
-- **阿里云/腾讯云** - 传统服务器
+后端主要读取这些变量：
 
-详见 [DEPLOYMENT.md](./docs/DEPLOYMENT.md)
-
----
-
-## ⚙️ API 配置说明
-
-本项目使用**两个独立的 API 配置**：
-
-| 用途 | 配置项 | 推荐服务商 | 免费额度 |
-|------|--------|------------|----------|
-| **图像生成** | `IMAGE_GEN_*` | claudex.me / OpenAI | - |
-| **Agent 文本分析** | `AGENT_*` | 智谱 AI / Gemini / Groq | 2000 万 Token / 1500 请求/天 |
-
-### 图像生成 API（必需）
+### 图像生成
 
 ```env
-IMAGE_GEN_API_KEY=sk-your-api-key-here
-IMAGE_GEN_BASE_URL=https://claudex.me/v1
+IMAGE_GEN_API_KEY=
+IMAGE_GEN_BASE_URL=
 IMAGE_GENERATION_MODEL=gpt-image-2
+IMAGE_GEN_TIMEOUT_MS=300000
+IMAGE_GEN_QUALITY=high
+IMAGE_PROMPT_MAX_CHARS=6500
 ```
 
-### Agent 文本分析 API（可选）
+### 策略分析 / 翻译
 
-用于 AI 智能分析产品、生成套图策略。不配置时，前端仍可手动填写图片策略。
-
-| 服务商 | 免费额度 | 推荐度 | 配置 |
-|--------|----------|--------|------|
-| **智谱 AI** | 2000 万 Token | ⭐⭐⭐⭐⭐ | `AGENT_BASE_URL=https://open.bigmodel.cn/api/paas/v4/` `AGENT_MODEL=glm-4-flash` |
-| **Google Gemini** | 1500 请求/天 | ⭐⭐⭐⭐ | `AGENT_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/` `AGENT_MODEL=gemini-2.0-flash` |
-| **Groq** | 14000 请求/天 | ⭐⭐⭐ | `AGENT_BASE_URL=https://api.groq.com/openai/v1` `AGENT_MODEL=llama-3.3-70b-versatile` |
-| **DeepSeek** | 新用户赠送 | ⭐⭐⭐⭐ | `AGENT_BASE_URL=https://api.deepseek.com/v1` `AGENT_MODEL=deepseek-chat` |
-
-> 💡 Agent 分析 Token 消耗：L1 ~1000-1500 / L2 ~1500-2500 / L3 ~2500-4000
-
----
-
-## 📁 项目结构
-
-```
-Amazon-image-ai/
-├── frontend/                 # React 前端
-│   ├── src/
-│   │   ├── components/       # UI 组件
-│   │   │   ├── AmazonListingForm.jsx
-│   │   │   ├── TemplateSelector.jsx      # 7 种营销策略选择器
-│   │   │   ├── AgentAnalyzer.jsx         # AI 分析组件
-│   │   │   ├── ProductImageUploader.jsx  # 拖拽上传
-│   │   │   ├── TaskGrid.jsx              # 生成任务网格
-│   │   │   ── ...
-│   │   ├── utils/            # 工具函数
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── package.json
-│   ── vite.config.js
-├── backend/                  # Express 后端
-│   ├── routes/
-│   │   ├── generate.js       # 图片生成接口
-│   │   ├── agent-analyze.js  # AI 分析接口
-│   │   ├── upload.js         # 文件上传接口
-│   │   └── prompt-preview.js # 策略预览接口
-│   ├── utils/
-│   │   ├── productModel.js   # 产品模型工具
-│   │   ├── upstreamRetry.js  # 上游重试工具
-│   │   ├── uploads.js        # 上传工具
-│   │   └── visualBlueprints.js # 视觉蓝图
-│   ├── config/
-│   │   ├── globalRules.js    # 全局规则
-│   │   └── visual-templates/ # 视觉模板配置
-│   ├── server.js
-│   └── package.json
-├── docs/                     # 文档
-│   ├── ARCHITECTURE.md       # 架构设计
-│   ├── DEPLOYMENT.md         # 部署指南
-│   └── API.md                # API 说明
-├── .gitignore
-├── package.json              # 根项目配置
-├── start-amazon-image-studio.bat      # Windows 启动脚本
-├── start-amazon-image-studio.ps1      # Windows PowerShell 启动逻辑
-├── start-amazon-image-studio.sh       # macOS/Linux 启动脚本
-├── stop-amazon-image-studio.bat       # Windows 停止脚本
-└── README.md
+```env
+AGENT_API_KEY=
+AGENT_BASE_URL=
+AGENT_MODEL=
+AGENT_TIMEOUT_MS=180000
 ```
 
----
+### 服务运行
 
-## 🔧 常见问题
+```env
+NODE_ENV=development
+BACKEND_PORT=3001
+JSON_BODY_LIMIT=4mb
+CORS_ORIGIN=
+UPLOAD_RETENTION_HOURS=24
+```
 
-### 1. 安装依赖失败
+## 关键代码说明
+
+### 前端
+
+- [frontend/src/App.jsx](./frontend/src/App.jsx)
+  - 主状态中心
+  - 生图、重生、继续生成、英文稿同步都在这里串起来
+
+- [frontend/src/components/AmazonListingForm.jsx](./frontend/src/components/AmazonListingForm.jsx)
+  - 商品输入区
+  - 图片任务规划
+  - 策略编辑区
+
+- [frontend/src/components/AgentAnalyzer.jsx](./frontend/src/components/AgentAnalyzer.jsx)
+  - 上传资源探测
+  - 调用 `/api/agent-analyze`
+
+- [frontend/src/components/TaskGrid.jsx](./frontend/src/components/TaskGrid.jsx)
+  - 结果区
+  - 查看、下载、重生、历史版本等操作
+
+- [frontend/src/utils/imageTasks.js](./frontend/src/utils/imageTasks.js)
+  - 图片类型定义
+  - 默认任务配置
+
+- [frontend/src/utils/requestPayload.js](./frontend/src/utils/requestPayload.js)
+  - 分析请求、生图请求的 payload 组织
+
+### 后端
+
+- [backend/server.js](./backend/server.js)
+  - 路由注册
+  - JSON 限制
+  - 健康检查
+  - 上传目录静态托管
+
+- [backend/routes/agent-analyze.js](./backend/routes/agent-analyze.js)
+  - 产品理解
+  - 主图固定策略
+  - 每张图的中文策略和英文执行稿生成
+
+- [backend/routes/generate.js](./backend/routes/generate.js)
+  - 生图接口
+  - 非主图执行 Prompt 组织
+  - 分辨率、复杂度、参考图处理
+
+- [backend/routes/prompt-preview.js](./backend/routes/prompt-preview.js)
+  - 单张策略英文执行稿生成
+
+- [backend/routes/upload.js](./backend/routes/upload.js)
+  - 上传数量限制
+  - 文件大小和格式校验
+
+## 当前代码里的重要约束
+
+### 上传限制
+
+- 最多 `8` 张图片
+- 单张最大 `10MB`
+- 支持：`jpg / jpeg / png / gif / webp`
+
+### 主图规则
+
+主图是固定规则，不是完全自由策略：
+
+- 纯白背景
+- 无文字
+- 无额外装饰
+- 符合 Amazon 主图规范
+- 主图参考优先级最高
+
+### 复杂度
+
+当前支持：
+
+- `L1`：更快、更简洁
+- `L2`：标准版，当前 UI 默认值
+- `L3`：更强调层级、信息量和质感
+
+复杂度会参与：
+
+- AI 策略生成
+- 生图执行
+
+## 已知现实情况
+
+这个项目当前已经比旧版流程清晰很多，但仍然要明确几件事：
+
+1. 参考图越能体现真实结构，策略和生图越稳  
+2. 安装类、夹持类、组合套装类产品，对“产品理解”和“参考图质量”要求更高  
+3. 英文执行稿和中文策略需要尽量保持一一对应，否则会造成执行偏差  
+4. 非主图不应该再让 Generate 层自己做太多“二次创作”决策  
+
+如果后续继续优化，建议优先守住这条原则：
+
+> 策略层负责决策，Generate 层负责执行。
+
+## 常见命令
 
 ```bash
-# 清除缓存重试
-npm cache clean --force
-npm ci
+# 根目录开发
+npm run dev
 
-# 或使用淘宝镜像
-npm config set registry https://registry.npmmirror.com
-npm ci
+# 构建前端
+npm run build
+
+# 启动后端生产服务
+npm run start
+
+# 后端测试脚本
+cd backend
+npm run test:generation-pipeline
 ```
 
-### 2. 端口被占用
+## 后续文档建议
 
-如果 5173 或 3001 端口被占用：
+如果继续补文档，建议按这三个方向补：
 
-```bash
-# 查看占用端口的进程
-# Windows
-netstat -ano | findstr :5173
+1. `docs/ARCHITECTURE.md`  
+   重点写清楚产品理解、策略生成、英文执行稿、生图执行四层关系
 
-# macOS/Linux
-lsof -i :5173
+2. `docs/API.md`  
+   补齐前后端真实请求结构和字段说明
 
-# 杀死进程或修改端口
-# 编辑 frontend/vite.config.js 修改 port
-```
-
-### 3. API Key 无效
-
-- 确认 API Key 格式正确（`sk-proj-` 或 `sk-` 开头）
-- 确认账户有足够余额
-- 检查 API Endpoint 是否正确
-- 测试网络连接
-
-### 4. 图片生成失败
-
-- 检查 API Key 是否有效（在设置中点击"测试连接"）
-- 查看后端日志（终端窗口）
-- 确认产品信息填写完整
-- 重试或刷新页面
-
-### 5. AI 分析失败
-
-- 检查 `AGENT_API_KEY` 配置（支持智谱 AI/Gemini/Groq/DeepSeek）
-- 确认 `AGENT_BASE_URL` 和 `AGENT_MODEL` 正确
-- 查看后端日志具体错误信息
+3. `docs/GENERATION_RULES.md`  
+   只保留当前有效规则，删掉过期的旧模板描述
 
 ---
 
-## 📝 更新日志
-
-### v2.0.0 (2026-06-30)
-- ✅ 新增 7 种营销策略库（替代旧版 8 种风格）
-- ✅ 新增 3 级复杂度控制（L1/L2/L3）
-- ✅ 新增 AI 智能分析功能（一键生成 7 张图策略）
-- ✅ 新增拖拽上传功能
-- ✅ 新增单图重试功能
-- ✅ 优化表单结构为 3 步流程
-- ✅ 删除冗余字段和组件
-
-### v1.0.0 (2026-06-05)
-- ✅ 初始版本发布
-- ✅ Amazon Listing 表单（9 个核心字段）
-- ✅ GPT-Image-2 集成
-- ✅ 8 种风格选择器
-- ✅ 合规检查功能
-- ✅ API 配置界面
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
----
-
-## 📄 许可证
-
-MIT License - 详见 [LICENSE](./LICENSE)
-
----
-
-## 👨‍💻 作者
-
-**神秘杨**
-
-- GitHub: [@SHENMIYANG](https://github.com/SHENMIYANG)
-
----
-
-## 🙏 致谢
-
-感谢以下开源项目：
-- [React](https://react.dev/)
-- [Vite](https://vitejs.dev/)
-- [Express](https://expressjs.com/)
-- [OpenAI](https://openai.com/)
-
----
-
-**⭐ 如果这个项目对你有帮助，请给个 Star！**
+如果你接下来要继续维护这个项目，建议先把 README 当作“当前真实版本说明书”，不要再把旧时代的 7 套固定模板、旧表单结构、旧策略链路写回来了。

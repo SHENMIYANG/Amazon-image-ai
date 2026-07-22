@@ -58,7 +58,7 @@ router.post('/', async (req, res) => {
         ...form.getHeaders(),
         Authorization: `Bearer ${IMAGE_GEN_API_KEY}`
       },
-      timeout: Number(process.env.IMAGE_GEN_TIMEOUT_MS || 300000)
+      timeout: Number(process.env.IMAGE_GEN_TIMEOUT_MS || 900000)
     })
 
     if (!response.data?.data?.[0]?.b64_json) {

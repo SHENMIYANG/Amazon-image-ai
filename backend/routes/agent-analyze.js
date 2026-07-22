@@ -5,11 +5,9 @@ import OpenAI from 'openai'
 import {
   getMarketplaceLanguage,
   inferArchetype,
-  normalizeConfidenceValue,
   normalizeStringArray
 } from '../utils/productModel.js'
 import { translatePlanPromptIfNeeded } from './generate.js'
-import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
 import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../utils/uploads.js'
 
 const router = express.Router()
@@ -247,6 +245,28 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
   return contentParts
 }
 
+function normalizeLineList(value = '', maxItems = 6, maxItemLength = 160) {
+  return String(value || '')
+    .split('\n')
+    .map((item) => item.replace(/^[\s\d\-*\.\[\]\(\)（）【】•·:：、]+/, '').trim())
+    .filter(Boolean)
+    .filter((item, index, source) => source.findIndex((candidate) => candidate === item) === index)
+    .slice(0, maxItems)
+    .map((item) => item.slice(0, maxItemLength))
+}
+
+function compactObject(source = {}) {
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => {
+      if (value === undefined || value === null) return false
+      if (typeof value === 'string') return value.trim() !== ''
+      if (Array.isArray(value)) return value.length > 0
+      if (typeof value === 'object') return Object.keys(value).length > 0
+      return true
+    })
+  )
+}
+
 function buildFallbackProductBlueprint({
   productName,
   category,
@@ -329,59 +349,59 @@ function buildFallbackProductBlueprint({
     identity: {
       productType: String(productName || '').trim() || 'Unknown product',
       category: String(category || '').trim() || 'General',
+      corePurpose: normalizeLineList(sellingPoints, 1, 140)[0] || 'Help buyers understand and purchase the product',
       market: `Amazon ${marketplace || 'UK'}`,
       archetype: signals?.archetype || 'Standing Product'
     },
     appearance: {
-      primaryColor: [],
-      material: materialItems,
-      distinctiveFeatures: []
+      color: '',
+      material: materialItems.join(', '),
+      visualStyle: ''
     },
     structure: {
-      parts,
-      connections,
-      visibleEvidence: []
-    },
-    mounting: {
-      mountType,
-      supportSurface,
-      placement,
-      connectionType: parts.includes('clamp') ? 'mechanical grip' : 'direct placement',
-      relationship,
-      allowed,
-      forbidden
+      mainParts: parts,
+      importantRelationships: connections
     },
     usage: {
-      useMode: signals?.archetype === 'Standing Product' ? 'freestanding use' : 'mounted use',
-      supportObject: supportSurface,
-      contactPoint: signals?.archetype === 'Clamp Mounted Device' ? ['support edge held between both clamp jaws'] : [],
-      spatialRelationship: relationship,
-      effectDirection: signals?.hasInteriorTarget ? ['device remains outside while its functional effect points toward the enclosure interior'] : [],
-      requiredVisibleEvidence: signals?.archetype === 'Clamp Mounted Device'
-        ? ['both clamp jaws visibly contact opposite sides of one real support edge', 'mounting contact remains unobstructed and readable']
-        : [],
-      forbiddenSpatialRelations: forbidden
+      usageScenario: signals?.archetype === 'Standing Product' ? 'freestanding use' : 'mounted or guided use',
+      userInteraction: [
+        ...supportSurface,
+        ...(signals?.archetype === 'Clamp Mounted Device' ? ['support edge held between both clamp jaws'] : []),
+        ...(signals?.hasInteriorTarget ? ['device remains outside while its effect points inward'] : [])
+      ].filter(Boolean).join('; ')
     },
-    relationships: {
-      mustKeep: connections
+    productRules: {
+      mustKeep: connections,
+      forbidden
     },
-    behavior,
+    installationRules: mountType
+      ? {
+          mountType,
+          supportSurface,
+          placement,
+          allowed,
+          relationship
+        }
+      : {},
+    bundleRules: parts.length > 1
+      ? {
+          includedItems: parts,
+          arrangement: referenceImages.length > 1 ? 'Supporting references may reveal additional included contents.' : ''
+        }
+      : {},
+    appearanceRules: compactObject({
+      shape: '',
+      texture: '',
+      pairMustMatch: false
+    }),
     reference: {
-      primaryReference: 'Primary product image',
-      secondaryReference: referenceImages.length > 1 ? 'Supporting product images' : 'None',
-      styleReference: 'Competitor or design references',
+      primary: 'Primary product image',
+      supporting: referenceImages.length > 1 ? ['Supporting product images'] : [],
       rules: [
         'Primary reference controls appearance, structure, and accessories.',
-        'Supporting references may supplement angle and detail only.',
-        'Style references may influence composition, lighting, and layout only.'
+        'Supporting references may supplement angle and detail only.'
       ]
-    },
-    confidence: {
-      appearance: 0.7,
-      structure: parts.length > 0 ? 0.8 : 0.55,
-      mounting: signals?.archetype === 'Standing Product' ? 0.55 : 0.78
-    },
-    uncertainties: []
+    }
   }
 }
 
@@ -393,172 +413,106 @@ function normalizeProductBlueprint(value, fallbackInput) {
   const identity = getSection('identity')
   const appearance = getSection('appearance')
   const structure = getSection('structure')
-  const mounting = getSection('mounting')
   const usage = getSection('usage')
-  const relationships = getSection('relationships')
-  const behavior = getSection('behavior')
+  const productRules = getSection('productRules')
+  const installationRules = getSection('installationRules')
+  const bundleRules = getSection('bundleRules')
+  const appearanceRules = getSection('appearanceRules')
   const reference = getSection('reference')
-  const confidence = getSection('confidence')
+  const legacyMounting = getSection('mounting')
+  const legacyRelationships = getSection('relationships')
 
   return {
     identity: {
       productType: String(identity.productType || fallback.identity.productType).trim(),
       category: String(identity.category || fallback.identity.category).trim(),
+      corePurpose: String(identity.corePurpose || fallback.identity.corePurpose).trim(),
       market: String(identity.market || fallback.identity.market).trim(),
       archetype: String(identity.archetype || fallback.identity.archetype).trim()
     },
     appearance: {
-      primaryColor: normalizeStringArray(appearance.primaryColor, 6),
-      material:
-        normalizeStringArray(appearance.material, 6).length > 0
-          ? normalizeStringArray(appearance.material, 6)
-          : fallback.appearance.material,
-      distinctiveFeatures: normalizeStringArray(appearance.distinctiveFeatures, 10)
+      color: String(appearance.color || normalizeStringArray(appearance.primaryColor, 6).join(', ') || fallback.appearance.color).trim(),
+      material: String(appearance.material || normalizeStringArray(appearance.material, 6).join(', ') || fallback.appearance.material).trim(),
+      visualStyle: String(appearance.visualStyle || normalizeStringArray(appearance.distinctiveFeatures, 10).join(', ') || fallback.appearance.visualStyle).trim()
     },
     structure: {
-      parts:
-        normalizeStringArray(structure.parts, 10).length > 0
-          ? normalizeStringArray(structure.parts, 10)
-          : fallback.structure.parts,
-      connections:
-        normalizeStringArray(structure.connections, 10).length > 0
-          ? normalizeStringArray(structure.connections, 10)
-          : fallback.structure.connections,
-      visibleEvidence: normalizeStringArray(structure.visibleEvidence, 10)
-    },
-    mounting: {
-      mountType: String(mounting.mountType || fallback.mounting.mountType).trim(),
-      supportSurface:
-        normalizeStringArray(mounting.supportSurface, 8).length > 0
-          ? normalizeStringArray(mounting.supportSurface, 8)
-          : fallback.mounting.supportSurface,
-      placement:
-        normalizeStringArray(mounting.placement, 8).length > 0
-          ? normalizeStringArray(mounting.placement, 8)
-          : fallback.mounting.placement,
-      connectionType: String(mounting.connectionType || fallback.mounting.connectionType).trim(),
-      relationship:
-        normalizeStringArray(mounting.relationship, 10).length > 0
-          ? normalizeStringArray(mounting.relationship, 10)
-          : fallback.mounting.relationship,
-      allowed:
-        normalizeStringArray(mounting.allowed, 10).length > 0
-          ? normalizeStringArray(mounting.allowed, 10)
-          : fallback.mounting.allowed,
-      forbidden:
-        normalizeStringArray(mounting.forbidden, 10).length > 0
-          ? normalizeStringArray(mounting.forbidden, 10)
-          : fallback.mounting.forbidden
+      mainParts:
+        normalizeStringArray(structure.mainParts || structure.parts, 12).length > 0
+          ? normalizeStringArray(structure.mainParts || structure.parts, 12)
+          : fallback.structure.mainParts,
+      importantRelationships:
+        normalizeStringArray(structure.importantRelationships || structure.connections, 12).length > 0
+          ? normalizeStringArray(structure.importantRelationships || structure.connections, 12)
+          : fallback.structure.importantRelationships
     },
     usage: {
-      useMode: String(usage.useMode || fallback.usage.useMode).trim(),
-      supportObject:
-        normalizeStringArray(usage.supportObject, 8).length > 0
-          ? normalizeStringArray(usage.supportObject, 8)
-          : fallback.usage.supportObject,
-      contactPoint:
-        normalizeStringArray(usage.contactPoint, 8).length > 0
-          ? normalizeStringArray(usage.contactPoint, 8)
-          : fallback.usage.contactPoint,
-      spatialRelationship:
-        normalizeStringArray(usage.spatialRelationship, 10).length > 0
-          ? normalizeStringArray(usage.spatialRelationship, 10)
-          : fallback.usage.spatialRelationship,
-      effectDirection:
-        normalizeStringArray(usage.effectDirection, 8).length > 0
-          ? normalizeStringArray(usage.effectDirection, 8)
-          : fallback.usage.effectDirection,
-      requiredVisibleEvidence:
-        normalizeStringArray(usage.requiredVisibleEvidence, 10).length > 0
-          ? normalizeStringArray(usage.requiredVisibleEvidence, 10)
-          : fallback.usage.requiredVisibleEvidence,
-      forbiddenSpatialRelations:
-        normalizeStringArray(usage.forbiddenSpatialRelations, 10).length > 0
-          ? normalizeStringArray(usage.forbiddenSpatialRelations, 10)
-          : fallback.usage.forbiddenSpatialRelations
+      usageScenario: String(usage.usageScenario || usage.useMode || fallback.usage.usageScenario).trim(),
+      userInteraction: String(
+        usage.userInteraction ||
+          [
+            ...normalizeStringArray(usage.supportObject, 8),
+            ...normalizeStringArray(usage.contactPoint, 8),
+            ...normalizeStringArray(usage.spatialRelationship, 10),
+            ...normalizeStringArray(usage.effectDirection, 8),
+            ...normalizeStringArray(usage.requiredVisibleEvidence, 8)
+          ].join('; ') ||
+          fallback.usage.userInteraction
+      ).trim()
     },
-    relationships: {
+    productRules: {
       mustKeep:
-        normalizeStringArray(relationships.mustKeep, 10).length > 0
-          ? normalizeStringArray(relationships.mustKeep, 10)
-          : fallback.relationships.mustKeep
+        normalizeStringArray(productRules.mustKeep || legacyRelationships.mustKeep, 12).length > 0
+          ? normalizeStringArray(productRules.mustKeep || legacyRelationships.mustKeep, 12)
+          : fallback.productRules.mustKeep,
+      forbidden:
+        normalizeStringArray(productRules.forbidden || legacyMounting.forbidden, 12).length > 0
+          ? normalizeStringArray(productRules.forbidden || legacyMounting.forbidden, 12)
+          : fallback.productRules.forbidden
     },
-    behavior: {
-      motion:
-        normalizeStringArray(behavior.motion, 8).length > 0
-          ? normalizeStringArray(behavior.motion, 8)
-          : fallback.behavior.motion,
-      adjustment:
-        normalizeStringArray(behavior.adjustment, 8).length > 0
-          ? normalizeStringArray(behavior.adjustment, 8)
-          : fallback.behavior.adjustment
-    },
+    installationRules: compactObject({
+      mountType: String(installationRules.mountType || legacyMounting.mountType || fallback.installationRules.mountType || '').trim(),
+      supportSurface:
+        normalizeStringArray(installationRules.supportSurface || legacyMounting.supportSurface, 8).length > 0
+          ? normalizeStringArray(installationRules.supportSurface || legacyMounting.supportSurface, 8)
+          : fallback.installationRules.supportSurface,
+      placement:
+        normalizeStringArray(installationRules.placement || legacyMounting.placement, 8).length > 0
+          ? normalizeStringArray(installationRules.placement || legacyMounting.placement, 8)
+          : fallback.installationRules.placement,
+      allowed:
+        normalizeStringArray(installationRules.allowed || legacyMounting.allowed, 10).length > 0
+          ? normalizeStringArray(installationRules.allowed || legacyMounting.allowed, 10)
+          : fallback.installationRules.allowed,
+      relationship:
+        normalizeStringArray(installationRules.relationship || legacyMounting.relationship, 10).length > 0
+          ? normalizeStringArray(installationRules.relationship || legacyMounting.relationship, 10)
+          : fallback.installationRules.relationship
+    }),
+    bundleRules: compactObject({
+      includedItems:
+        normalizeStringArray(bundleRules.includedItems, 16).length > 0
+          ? normalizeStringArray(bundleRules.includedItems, 16)
+          : fallback.bundleRules.includedItems,
+      quantity: String(bundleRules.quantity || '').trim(),
+      arrangement: String(bundleRules.arrangement || fallback.bundleRules.arrangement || '').trim()
+    }),
+    appearanceRules: compactObject({
+      pairMustMatch: Boolean(appearanceRules.pairMustMatch),
+      texture: String(appearanceRules.texture || '').trim(),
+      shape: String(appearanceRules.shape || '').trim()
+    }),
     reference: {
-      primaryReference: String(reference.primaryReference || fallback.reference.primaryReference).trim(),
-      secondaryReference: String(reference.secondaryReference || fallback.reference.secondaryReference).trim(),
-      styleReference: String(reference.styleReference || fallback.reference.styleReference).trim(),
+      primary: String(reference.primary || reference.primaryReference || fallback.reference.primary).trim(),
+      supporting:
+        normalizeStringArray(reference.supporting, 8).length > 0
+          ? normalizeStringArray(reference.supporting, 8)
+          : fallback.reference.supporting,
       rules:
         normalizeStringArray(reference.rules, 8).length > 0
           ? normalizeStringArray(reference.rules, 8)
           : fallback.reference.rules
-    },
-    confidence: {
-      appearance: normalizeConfidenceValue(confidence.appearance) ?? fallback.confidence.appearance,
-      structure: normalizeConfidenceValue(confidence.structure) ?? fallback.confidence.structure,
-      mounting: normalizeConfidenceValue(confidence.mounting) ?? fallback.confidence.mounting
-    },
-    uncertainties: normalizeStringArray(candidate.uncertainties, 8)
+    }
   }
-}
-
-function buildTaskConstraints(taskType, productBlueprint) {
-  const constraints = []
-  const archetype = productBlueprint.identity?.archetype || 'Standing Product'
-  const relationships = normalizeStringArray(productBlueprint.relationships?.mustKeep, 10)
-  const mountingRelationships = normalizeStringArray(productBlueprint.mounting?.relationship, 10)
-  const mountingAllowed = normalizeStringArray(productBlueprint.mounting?.allowed, 10)
-  const mountingForbidden = normalizeStringArray(productBlueprint.mounting?.forbidden, 10)
-  const usageRelationships = normalizeStringArray(productBlueprint.usage?.spatialRelationship, 10)
-  const usageEvidence = normalizeStringArray(productBlueprint.usage?.requiredVisibleEvidence, 10)
-  const forbiddenSpatialRelations = normalizeStringArray(productBlueprint.usage?.forbiddenSpatialRelations, 10)
-
-  if (taskType === 'main') {
-    constraints.push(
-      'Full product visible with no crop.',
-      'Centered composition.',
-      'Product body occupies about 80% to 90% of frame.',
-      'Minimal empty margin around the product.',
-      'Pure white background RGB 255,255,255.',
-      'No text, no decorative props, no watermark, no added logo.'
-    )
-  } else {
-    constraints.push(
-      'Keep appearance, proportions, material, and real structure consistent with primary reference.',
-      'Do not create impossible contact relationships.'
-    )
-  }
-
-  if (relationships.length > 0) {
-    constraints.push(...relationships)
-  }
-
-  if (archetype !== 'Standing Product' && mountingRelationships.length > 0) {
-    constraints.push(...mountingRelationships)
-  }
-
-  if (taskType === 'scenario' || taskType === 'steps' || taskType === 'dimensions') {
-    constraints.push(...mountingAllowed)
-    constraints.push(...mountingForbidden.map((item) => `Avoid ${item}`))
-    constraints.push(...usageRelationships)
-    constraints.push(...usageEvidence)
-    constraints.push(...forbiddenSpatialRelations.map((item) => `Avoid ${item}`))
-  }
-
-  if (taskType === 'dimensions') {
-    constraints.push('Each measurement label should appear once only.')
-  }
-
-  return [...new Set(constraints)].slice(0, 12)
 }
 
 function parseCompletionJson(completion, label) {
@@ -578,29 +532,6 @@ function parseCompletionJson(completion, label) {
   return JSON.parse(rawContent)
 }
 
-function getBlueprintQualityIssues(productBlueprint = {}) {
-  const issues = []
-  const parts = normalizeStringArray(productBlueprint.structure?.parts, 12)
-  const connections = normalizeStringArray(productBlueprint.structure?.connections, 12)
-  const colors = normalizeStringArray(productBlueprint.appearance?.primaryColor, 8)
-  const archetype = productBlueprint.identity?.archetype || 'Standing Product'
-
-  if (colors.length === 0) issues.push('primary product colors were not identified')
-  if (parts.length < 2) issues.push('visible product parts are incomplete')
-  if (parts.length >= 2 && connections.length === 0) issues.push('connections between visible parts are missing')
-
-  if (archetype !== 'Standing Product') {
-    if (normalizeStringArray(productBlueprint.usage?.contactPoint, 8).length === 0) {
-      issues.push('mounting contact points are missing')
-    }
-    if (normalizeStringArray(productBlueprint.usage?.requiredVisibleEvidence, 8).length === 0) {
-      issues.push('visible proof of correct use or mounting is missing')
-    }
-  }
-
-  return issues
-}
-
 function createFixedMainPlan(requestedTask, id) {
   return {
     id,
@@ -608,21 +539,9 @@ function createFixedMainPlan(requestedTask, id) {
     type: 'main',
     taskType: 'main',
     taskKey: requestedTask.taskKey,
-    purpose: requestedTask.purpose,
-    goal: '提升 Amazon 搜索结果点击率，清晰展示完整产品',
-    layout: '方形纯白画布，完整产品居中，主体最长边约占画面 85%',
-    focus: '完整且真实的产品主体与已确认标配配件',
-    textDensity: 'none',
-    style: 'Amazon 主图',
-    visualKeywords: [],
-    constraints: [
-      '完整产品不可裁切',
-      '主体最长边约占画面 85% 并居中',
-      '纯白背景 RGB 255,255,255',
-      '无文字、无装饰、无额外 Logo',
-      '不得新增或删除产品结构与配件'
-    ],
-    hardConstraints: [
+    imageRole: 'Amazon 主图',
+    sellingFocus: '完整且真实地展示产品主体与已确认标配配件',
+    executionRules: [
       '完整产品不可裁切',
       '主体最长边约占画面 85% 并居中',
       '纯白背景 RGB 255,255,255',
@@ -630,58 +549,21 @@ function createFixedMainPlan(requestedTask, id) {
       '不得新增或删除产品结构与配件'
     ],
     copy: [],
-    allowTextOverlay: false,
     strategyContent: MAIN_IMAGE_STRATEGY_ZH,
-    visualBlueprint: normalizeVisualBlueprint({}, 'main'),
     promptEn: MAIN_IMAGE_STRATEGY_EN,
     promptDirty: false
   }
 }
 
-function defaultGoal(taskType) {
-  switch (taskType) {
-    case 'main':
-      return 'Increase CTR'
-    case 'dimensions':
-      return 'Reduce Return Risk'
-    case 'scenario':
-    case 'steps':
-      return 'Reduce Understanding Cost'
-    case 'detail':
-      return 'Build Trust'
-    case 'summary':
-      return 'Highlight Differentiation'
-    default:
-      return 'Increase Conversion'
-  }
-}
-
-function defaultLayout(taskType) {
-  switch (taskType) {
-    case 'main':
-      return 'Center Product'
-    case 'scenario':
-      return 'Product First in Scene'
-    case 'detail':
-      return 'Tight Detail Crop'
-    case 'dimensions':
-      return 'Centered Product with Measurement Space'
-    case 'summary':
-      return 'Balanced Summary Layout'
-    default:
-      return 'Left Product Right Text'
-  }
-}
-
-function getComplexityDefinition(complexity = 'L1') {
-  switch (String(complexity || 'L1').trim().toUpperCase()) {
+function getComplexityDefinition(complexity = 'L2') {
+  switch (String(complexity || 'L2').trim().toUpperCase()) {
     case 'L3':
-      return 'L3 refined mode: allow richer information hierarchy, more supporting detail, and stronger layout design, but do not repeat selling points, overload the frame, or weaken product truth.'
+      return 'L3 refined mode: keep the same product understanding and image duties, but allow richer visual proof, denser supporting detail, and stronger scene integration without weakening product truth.'
     case 'L2':
-      return 'L2 standard mode: balance conversion clarity and information completeness. One image may carry one main theme plus a small amount of closely related supporting information.'
+      return 'L2 standard mode: keep one clear buying mission per image while allowing one naturally related supporting proof point and balanced information density.'
     case 'L1':
     default:
-      return 'L1 fast mode: prioritize simplicity, fast understanding, low text density, strong product focus, and lower error risk. Keep each image visually direct and avoid overloading it.'
+      return 'L1 fast mode: keep the same product truth and image duties, but express each image in a simpler, faster-to-read, lower-density way with fewer supporting layers.'
   }
 }
 
@@ -712,6 +594,59 @@ function extractSellingPointList(rawValue = '') {
     .slice(0, 12)
 }
 
+function deriveExecutionRulesFromStrategy(strategyContent = '', productBlueprint = {}, taskType = '') {
+  const ruleKeywords = [
+    '必须',
+    '不得',
+    '不能',
+    '禁止',
+    '保持',
+    '完整',
+    '清楚',
+    '可见',
+    '真实',
+    '一致',
+    '不要',
+    '避免',
+    '严禁',
+    '接触',
+    '对准',
+    '数量',
+    '配件',
+    '尺寸'
+  ]
+  const strategyRules = String(strategyContent || '')
+    .replace(/\r\n/g, '\n')
+    .split(/[。\n；;]/)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 6)
+    .filter((line) => ruleKeywords.some((keyword) => line.includes(keyword)))
+    .slice(0, 6)
+
+  const blueprintRules = normalizeStringArray(
+    [
+      ...(productBlueprint.productRules?.mustKeep || []),
+      ...(productBlueprint.productRules?.forbidden || []),
+      ...(productBlueprint.structure?.importantRelationships || []),
+      ...(productBlueprint.installationRules?.relationship || []),
+      ...(productBlueprint.bundleRules?.includedItems || [])
+    ],
+    6,
+    120
+  )
+
+  const taskFallback = {
+    feature: ['产品外观、颜色、结构、数量和配件必须与参考图一致', '卖点必须通过画面直接证明，避免只写文案不展示产品'],
+    scenario: ['产品使用方式必须符合产品资料和参考图', '产品与使用对象的接触、位置和比例必须真实可信'],
+    detail: ['细节特写不得改变产品结构、材质纹理和真实比例', '关键细节必须清楚可见'],
+    dimensions: ['尺寸标注必须来自已确认资料或清晰参考图，不得编造', '同一尺寸信息不要重复标注'],
+    steps: ['步骤关系必须按真实使用顺序展示', '不得出现错误安装、错误接触或悬空关系'],
+    summary: ['总结信息必须来自已确认卖点和产品资料', '不得新增未确认配件、认证或夸大承诺']
+  }[taskType] || ['产品外观、颜色、结构、数量和配件必须与参考图一致']
+
+  return [...new Set([...strategyRules, ...blueprintRules, ...taskFallback])].slice(0, 8)
+}
+
 function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
   const count = strategyTasks.length
 
@@ -719,10 +654,10 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
     return [
       `This is a focused ${count}-image selling-point bundle, not a full 7-image listing set.`,
       'Prioritize the strongest distinct buying reasons first.',
-      'Distribute selling points like a shot list, not like repeated captions.',
+      'Distribute image missions like a shot list, not like repeated captions.',
       'Do not force summary, gift, or decorative scene roles unless the product information clearly demands them.',
-      'If selling points are more than image count, merge only naturally related benefits into the same image and keep one primary benefit plus at most one secondary benefit per image.',
-      'If selling points are fewer than image count, expand with installation, usage, compatibility, fit, or material trust angles instead of repeating one benefit.',
+      'If selling points are more than image count, merge naturally related benefits into one image when they serve the same buying reason.',
+      'If selling points are fewer than image count, expand with installation, usage, compatibility, fit, bundle completeness, or material trust angles instead of repeating one reason.',
       'Every image must feel essential to conversion.'
     ].join(' ')
   }
@@ -757,7 +692,7 @@ router.post('/', async (req, res) => {
       category,
       marketplace,
       imageLanguage,
-      complexity = 'L1',
+      complexity = 'L2',
       dimensions,
       material,
       targetAudience,
@@ -822,7 +757,7 @@ router.post('/', async (req, res) => {
     const baseUrl =
       process.env.AGENT_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
     const model = process.env.AGENT_MODEL || 'gpt-4o-mini'
-    const timeoutMs = Number(process.env.AGENT_TIMEOUT_MS || 180000)
+    const timeoutMs = Number(process.env.AGENT_TIMEOUT_MS || 600000)
 
     if (!apiKey || apiKey === 'sk-your-api-key-here') {
       return res.status(500).json({
@@ -861,68 +796,51 @@ router.post('/', async (req, res) => {
       .join('\n\n')
 
     const combinedSystemPrompt = `
-You are acting as an Amazon marketplace operator, ecommerce visual planner, and English ad-copy strategist for high-volume, non-branded products.
-Your job is to understand the real product from images first, then generate Amazon-ready image strategies for the user-selected image tasks.
-Do the product understanding and the requested non-main image planning in one pass.
+You are an Amazon marketplace operator, ecommerce visual planner, and English ad-copy strategist for high-volume, non-branded products.
+Your job is to do three things in one pass:
+1. Understand the real product from the supplied product images and product information.
+2. Allocate the user-selected image tasks into a conversion-focused image set.
+3. Write operator-editable Chinese directorial strategies plus controlled English execution prompts.
+
 Return JSON only with two top-level keys: productBlueprint and imagePlans.
 imagePlans must contain exactly ${strategyTasks.length} items in the same order as the task list.
 
-productBlueprint must include:
-- identity: productType, category, market, archetype
-- appearance: primaryColor, material, distinctiveFeatures
-- structure: parts, connections, visibleEvidence
-- mounting: mountType, supportSurface, placement, connectionType, relationship, allowed, forbidden
-- usage: useMode, supportObject, contactPoint, spatialRelationship, effectDirection, requiredVisibleEvidence, forbiddenSpatialRelations
-- relationships: mustKeep
-- behavior: motion, adjustment
-- reference: primaryReference, secondaryReference, styleReference, rules
-- confidence: appearance, structure, mounting (0 to 1)
-- uncertainties
+productBlueprint must use this fixed skeleton:
+- identity: productType, category, corePurpose, market, archetype
+- appearance: color, material, visualStyle
+- structure: mainParts, importantRelationships
+- usage: usageScenario, userInteraction
+- productRules: mustKeep, forbidden
+- installationRules
+- bundleRules
+- appearanceRules
+- reference: primary, supporting, rules
 
 Each image plan must include:
 - taskKey, name, type
 - imageRole
-- buyerQuestion
-- primarySellingPoint
-- goal
-- focus
-- layout
-- constraints
-- copy: exact short ${marketplaceLanguage} text allowed to appear in the image
-- allowTextOverlay
-- strategyContent: the canonical Chinese strategy reviewed and edited by operators
-- promptEn: a faithful English execution version of strategyContent for the image model
+- sellingFocus
+- strategyContent
+- copy
+- executionRules
+- promptEn
 
-Rules:
-1. Inspect the explicit primary image first. It is the highest authority for shape, color, proportions, structure, printed marks, accessories, and connections.
-2. Supporting product images may reveal other angles, missing parts, full package contents, usage setup, or structure that the main image does not fully show. Use them to complete product understanding, but do not let them override the main product identity.
-3. Layout or style references may influence composition, atmosphere, and selling presentation, but they may not change product truth.
-4. Product text explains specifications, intended use, and image requirements, and should be combined with image evidence rather than ignored.
-5. List concrete visible parts, not broad groups. Include cables, controllers, connectors, jaws, handles, bulbs, buttons, fasteners, package contents, and other visually important parts when present.
-6. Describe how every major part connects to the next part as one continuous physical product.
-7. For mounted or supported products, describe exact contact geometry, inside/outside placement, force or support logic, and visible proof that makes the installation believable.
-8. Do not invent hidden geometry or package contents. Put unverified facts in uncertainties.
-9. primaryColor may not be empty when colors are visible in the references.
-10. visibleEvidence and requiredVisibleEvidence must describe what a generated image must visibly preserve, not abstract product benefits.
-11. strategyContent is the single source of truth for operators and final image execution. Write it as operator-readable Chinese directorial strategy, not as a rigid five-line template. It must clearly cover: image objective, required product truth, scene or composition direction, allowed copy if any, and critical avoid rules.
-12. promptEn must be a faithful English execution version of strategyContent. It is translation for model execution, not a new plan. Do not add, remove, summarize, beautify, or reinterpret requirements.
-13. Think like a director. Do not write a generic description. Specify what the model must visibly show, where it should appear, what selling mission the image serves, and what visual proof is required.
-14. Selling-point allocation should adapt to product type, selected tasks, image count, and complexity. Core product function has priority over secondary emotional or decorative value. Show the main functional buying reason first, then supporting benefits. Do not force one selling point per image. For gift sets, bundles, kits, and multi-piece products, one image may carry a core theme plus several naturally related items or benefits when helpful.
-15. The image must prove the selling point visually. Do not plan invisible internal mechanisms as if they can be photographed.
-16. Use supplied usage steps, pain points, installation methods, explicit image requirements, and scene requirements when relevant. If the user already described "main image", "feature image 1/2/3", "scene image", or similar roles, treat those as partially specified image duties and respect them.
-17. For products with mounting, contact, movement, or direction, describe visible geometry and success evidence precisely.
-18. Text is forbidden only for the Amazon main image, which is handled separately. Other image types may use concise text when it improves conversion or understanding.
-19. copy must come from confirmed selling points, dimensions, usage, or supplied requirements. Localize and shorten it for Amazon ${marketplace || 'UK'}, but never invent a new claim. Copy is not limited to one short line; choose none, one headline, or a compact headline plus supporting line according to the image mission and complexity.
-20. If readable quantity, dimensions, or package-content text is clearly visible in the supplied reference images, you may extract and use it conservatively. Do not guess unreadable text. Do not invent measurements or counts that are not clearly confirmed by images or product text.
-21. Do not force repeated layout templates. Choose composition from product shape, visible evidence, buyer question, reference images, and complexity.
-22. Respect uncertainties. Do not build a strategy around an unverified variant, accessory, quantity, or performance claim.
-23. Each non-main image should answer a different buyer question and play a different role within the set unless the user explicitly requests repetition.
-24. If only 3 to 5 feature images are requested, treat the set as a focused conversion bundle rather than a full listing sequence.
-25. When image count is limited, prioritize the strongest buying reasons, true use understanding, fit or size clarity, package completeness, and trust-building detail before filler content.
-26. Scene images must prove real use context. They may not exist only for mood, beauty, or decoration.
-27. Dimension images must focus on size, fit, clearance, scale, package completeness, or compatibility and must not repeat feature-copy as their core message.
-28. Steps or installation images must focus on how the product is used, mounted, attached, or operated and must not duplicate feature-image duties.
-29. Summary images must reinforce value or trust and must not mechanically restate previous image roles.
+Hard rules:
+1. The explicit primary product image is the highest authority for product identity, shape, color, proportions, structure, quantity, printed marks, accessories, and relationships.
+2. Supporting product images may supplement angle, missing contents, usage, or structure, but may not override primary product truth.
+3. Layout or competitor references may influence selling presentation, composition, or atmosphere, but may not change product truth.
+4. Product text and user requirements must be combined with image evidence. Do not ignore clear user-supplied image duties.
+5. strategyContent is the single source of truth for operators and final image execution.
+6. promptEn must be a controlled visual English conversion of strategyContent. It may express the same idea in natural visual English, but may not add new scene elements, claims, features, layout decisions, or objects that are not already supported by strategyContent.
+7. Complexity must not change product understanding or core image-role allocation. Complexity only changes information density, text density, scene richness, and visual complexity.
+8. Different images should not mechanically repeat the same buying mission unless the user explicitly requests repetition.
+9. One image may carry multiple related selling points when they support the same buying reason.
+10. Scene images may prove selling points. Feature images may use believable real-use context. Do not rigidly separate them.
+11. The strategy must think like a director, not like a database. Write what the image must prove, how the product should appear, what may support the message, and what must be avoided.
+12. Do not invent hidden geometry, unsupported quantities, unverified accessories, or unconfirmed claims.
+13. When image count is small, prioritize the biggest buying reasons first. When image count is larger, expand into detail, trust, usage, and supporting proof.
+14. Text is forbidden only for the Amazon main image. Non-main images may use concise copy when it helps conversion or understanding.
+15. executionRules are mandatory for every non-main image. Write 3 to 6 concise Chinese hard execution rules that protect product truth, accessory truth, contact logic, quantity, dimensions, text accuracy, or other boundaries. Do not leave executionRules empty.
 `.trim()
 
     const combinedUserPrompt = `
@@ -954,7 +872,12 @@ Planning rule
 ${strategyModeInstruction}
 
 Selling point allocation note
-There are ${sellingPointList.length} detected selling points for ${strategyTasks.length} non-main requested images. You must consciously decide how to distribute them across shots. Do not repeat points mechanically. Do not leave major confirmed selling points unused when the requested image count can still cover them through smart grouping. Let complexity influence information density, text density, and how many closely related ideas one image can responsibly carry.
+There are ${sellingPointList.length} detected selling points for ${strategyTasks.length} non-main requested images. You must consciously allocate buying missions across the selected shots. One image may cover multiple related selling points if they support the same buying reason. Do not repeat missions mechanically. Let complexity influence density and richness, not product truth.
+
+Internal workflow reminder
+Step 1 product understanding must stay stable and independent from complexity.
+Step 2 task allocation must decide what each image is trying to sell or prove.
+Step 3 strategy writing must express those duties in operator-editable Chinese and controlled English execution text.
 `.trim()
 
     const combinedCompletion = await createAgentCompletion(openai, {
@@ -995,14 +918,9 @@ There are ${sellingPointList.length} detected selling points for ${strategyTasks
       name: task.name,
       type: task.taskType,
       imageRole: '',
-      buyerQuestion: '',
-      primarySellingPoint: '',
-      goal: '',
-      focus: '',
-      layout: '',
-      constraints: [],
+      sellingFocus: '',
+      executionRules: [],
       copy: [],
-      allowTextOverlay: task.taskType !== 'main',
       strategyContent: '',
       promptEn: ''
     })
@@ -1016,12 +934,15 @@ There are ${sellingPointList.length} detected selling points for ${strategyTasks
       const plan = strategyPlans[nonMainPlanIndex] || {}
       nonMainPlanIndex += 1
 
-      const normalizedFocus = String(
-        plan.focus || (requestedTask.taskType === 'main' ? '完整产品主体' : '当前图片核心卖点')
-      ).trim()
       const strategyContent = String(plan.strategyContent || '').trim()
-
-      const allowTextOverlay = Boolean(plan.allowTextOverlay)
+      const normalizedCopy = normalizeStringArray(plan.copy, 3)
+      const shouldAllowCopy = requestedTask.taskType !== 'main' && normalizedCopy.length > 0
+      const sellingFocus = String(
+        plan.sellingFocus ||
+          plan.primarySellingPoint ||
+          plan.focus ||
+          ''
+      ).trim()
 
       return {
         id: index + 1,
@@ -1030,21 +951,13 @@ There are ${sellingPointList.length} detected selling points for ${strategyTasks
         taskType: requestedTask.taskType,
         taskKey: requestedTask.taskKey,
         imageRole: String(plan.imageRole || '').trim(),
-        buyerQuestion: String(plan.buyerQuestion || '').trim(),
-        primarySellingPoint: String(plan.primarySellingPoint || plan.focus || '').trim(),
-        purpose: String(plan.purpose || requestedTask.purpose).trim(),
-        goal: String(plan.goal || '').trim() || defaultGoal(requestedTask.taskType),
-        layout: String(plan.layout || '').trim() || defaultLayout(requestedTask.taskType),
-        focus: normalizedFocus,
-        textDensity: String(plan.textDensity || '').trim(),
-        style: String(plan.style || '').trim(),
-        visualKeywords: normalizeStringArray(plan.visualKeywords, 8),
-        constraints: normalizeStringArray(plan.constraints, 12).slice(0, 6),
-        hardConstraints: normalizeStringArray(plan.hardConstraints || plan.constraints, 12).slice(0, 6),
-        copy: allowTextOverlay ? normalizeStringArray(plan.copy, 2) : [],
-        allowTextOverlay,
+        sellingFocus,
+        executionRules:
+          normalizeStringArray(plan.executionRules || plan.constraints, 12).slice(0, 8).length > 0
+            ? normalizeStringArray(plan.executionRules || plan.constraints, 12).slice(0, 8)
+            : deriveExecutionRulesFromStrategy(strategyContent, productBlueprint, requestedTask.taskType),
+        copy: shouldAllowCopy ? normalizedCopy : [],
         strategyContent,
-        visualBlueprint: normalizeVisualBlueprint({}, requestedTask.taskType),
         promptEn: String(plan.promptEn || '').trim(),
         promptDirty: false
       }

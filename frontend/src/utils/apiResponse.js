@@ -1,6 +1,9 @@
 function buildNonJsonResponseMessage(label, response, rawText) {
   const trimmed = String(rawText || '').trim()
-  const looksLikeHtml = trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || trimmed.startsWith('<')
+  const looksLikeHtml =
+    trimmed.startsWith('<!doctype') ||
+    trimmed.startsWith('<html') ||
+    trimmed.startsWith('<')
   const suffix = response?.status ? `（HTTP ${response.status}）` : ''
 
   if (looksLikeHtml) {

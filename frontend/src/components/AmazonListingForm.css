@@ -622,6 +622,48 @@
   line-height: 1.45;
 }
 
+.image-plan-execution-block {
+  margin-top: 0.65rem;
+  padding-top: 0.62rem;
+  border-top: 1px dashed #dbe2ea;
+}
+
+.image-plan-execution-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.42rem;
+}
+
+.image-plan-execution-block__tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.image-plan-execution-block__header small {
+  color: #7a8496;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.image-plan-group .image-plan-execution-textarea {
+  min-height: 72px;
+  padding: 0.58rem 0.68rem;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 0.75rem;
+  line-height: 1.42;
+}
+
 .editor-modal-overlay {
   position: fixed;
   inset: 0;

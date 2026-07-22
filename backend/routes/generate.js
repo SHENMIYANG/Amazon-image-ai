@@ -9,7 +9,6 @@ import crypto from 'crypto'
 import {
   getMarketplaceLanguage,
   inferArchetype,
-  normalizeConfidenceValue,
   normalizeStringArray
 } from '../utils/productModel.js'
 import { postJsonWithRetry } from '../utils/upstreamRetry.js'
@@ -167,8 +166,7 @@ router.post('/', async (req, res) => {
           name: plan.name,
           taskType: plan.taskType || plan.type || null,
           imageRole: plan.imageRole || null,
-          buyerQuestion: plan.buyerQuestion || null,
-          primarySellingPoint: plan.primarySellingPoint || null,
+          sellingFocus: plan.sellingFocus || plan.primarySellingPoint || null,
           imageUrl: generatedImage.imageUrl,
           prompt,
           promptEn: normalizedPlan.promptEn || '',
@@ -189,8 +187,7 @@ router.post('/', async (req, res) => {
           name: plan.name,
           taskType: plan.taskType || plan.type || null,
           imageRole: plan.imageRole || null,
-          buyerQuestion: plan.buyerQuestion || null,
-          primarySellingPoint: plan.primarySellingPoint || null,
+          sellingFocus: plan.sellingFocus || plan.primarySellingPoint || null,
           status: 'failed',
           error: errorMessage,
           prompt: buildAmazonPrompt(
@@ -293,7 +290,7 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
   } else if (result.url) {
     const imageResponse = await axios.get(result.url, {
       responseType: 'arraybuffer',
-      timeout: 60000
+      timeout: Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 180000)
     })
     imageBuffer = Buffer.from(imageResponse.data)
   } else {
@@ -317,8 +314,8 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
 }
 
 function getImageGenerationTimeoutMs() {
-  const timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS || 300000)
-  return Number.isFinite(timeoutMs) && timeoutMs >= 60000 ? timeoutMs : 300000
+  const timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS || 900000)
+  return Number.isFinite(timeoutMs) && timeoutMs >= 60000 ? timeoutMs : 900000
 }
 
 function formatGenerateError(err) {
@@ -357,7 +354,6 @@ function normalizeExecutionRequest({
     : {}
 
   const executionListing = {
-    ...listing,
     ...executionProduct,
     productBlueprint:
       executionProduct.productBlueprint ||
@@ -642,11 +638,8 @@ function detectProductBounds(data, width, height, channels, backgroundColor = [2
 }
 
 function buildMainImagePrompt(listing, imagePlan, productBlueprint, visualBlueprint, resolution, primaryReferenceImageUrl) {
-  const visibleParts = normalizeStringArray(productBlueprint.structure?.parts, 8)
-  const strategyConstraints = normalizeStringArray(
-    Array.isArray(imagePlan?.constraints) ? imagePlan.constraints : imagePlan?.hardConstraints,
-    10
-  )
+  const visibleParts = normalizeStringArray(productBlueprint.structure?.mainParts, 10)
+  const strategyConstraints = normalizeStringArray(imagePlan?.executionRules || imagePlan?.constraints, 10)
   const executionHint = getExecutionHint(imagePlan)
 
   const lines = [
@@ -661,11 +654,6 @@ function buildMainImagePrompt(listing, imagePlan, productBlueprint, visualBluepr
 
   if (visibleParts.length > 0) {
     lines.push('Keep these real product parts visible and structurally connected: ' + visibleParts.join(', ') + '.')
-  }
-
-  const uncertainties = normalizeStringArray(productBlueprint.uncertainties, 8)
-  if (uncertainties.length > 0) {
-    lines.push('Do not present these unverified facts as confirmed: ' + uncertainties.join(' | ') + '.')
   }
 
   if (productBlueprint.identity?.archetype === 'Clamp Mounted Device') {
@@ -698,6 +686,18 @@ function buildMainImagePrompt(listing, imagePlan, productBlueprint, visualBluepr
 
 function cleanPromptText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function compactObject(source = {}) {
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => {
+      if (value === undefined || value === null) return false
+      if (typeof value === 'string') return value.trim() !== ''
+      if (Array.isArray(value)) return value.length > 0
+      if (typeof value === 'object') return Object.keys(value).length > 0
+      return true
+    })
+  )
 }
 
 function getExecutionHint(imagePlan = {}) {
@@ -735,69 +735,76 @@ function getProductBlueprint(listing = {}) {
   const identity = blueprint.identity && typeof blueprint.identity === 'object' ? blueprint.identity : {}
   const appearance = blueprint.appearance && typeof blueprint.appearance === 'object' ? blueprint.appearance : {}
   const structure = blueprint.structure && typeof blueprint.structure === 'object' ? blueprint.structure : {}
-  const mounting = blueprint.mounting && typeof blueprint.mounting === 'object' ? blueprint.mounting : {}
-  const relationships = blueprint.relationships && typeof blueprint.relationships === 'object' ? blueprint.relationships : {}
-  const behavior = blueprint.behavior && typeof blueprint.behavior === 'object' ? blueprint.behavior : {}
   const usage = blueprint.usage && typeof blueprint.usage === 'object' ? blueprint.usage : {}
+  const productRules = blueprint.productRules && typeof blueprint.productRules === 'object' ? blueprint.productRules : {}
+  const installationRules = blueprint.installationRules && typeof blueprint.installationRules === 'object' ? blueprint.installationRules : {}
+  const bundleRules = blueprint.bundleRules && typeof blueprint.bundleRules === 'object' ? blueprint.bundleRules : {}
+  const appearanceRules = blueprint.appearanceRules && typeof blueprint.appearanceRules === 'object' ? blueprint.appearanceRules : {}
   const reference = blueprint.reference && typeof blueprint.reference === 'object' ? blueprint.reference : {}
-  const confidence = blueprint.confidence && typeof blueprint.confidence === 'object' ? blueprint.confidence : {}
 
   return {
     identity: {
       productType: cleanPromptText(identity.productType || listing.productName || 'Product'),
       category: cleanPromptText(identity.category || listing.category || 'General'),
+      corePurpose: cleanPromptText(identity.corePurpose || ''),
       market: cleanPromptText(identity.market || ('Amazon ' + (listing.marketplace || 'UK'))),
       archetype: cleanPromptText(identity.archetype || inferArchetype(rawContext))
     },
     appearance: {
-      primaryColor: normalizeStringArray(appearance.primaryColor, 6),
-      material: normalizeStringArray(appearance.material, 6).length > 0
-        ? normalizeStringArray(appearance.material, 6)
-        : normalizeLineList(listing.material, 5, 120),
-      distinctiveFeatures: normalizeStringArray(appearance.distinctiveFeatures, 10)
+      color: cleanPromptText(appearance.color || normalizeStringArray(appearance.primaryColor, 6).join(', ')),
+      material: cleanPromptText(
+        appearance.material ||
+          normalizeStringArray(appearance.material, 6).join(', ') ||
+          normalizeLineList(listing.material, 5, 120).join(', ')
+      ),
+      visualStyle: cleanPromptText(appearance.visualStyle || normalizeStringArray(appearance.distinctiveFeatures, 10).join(', '))
     },
     structure: {
-      parts: normalizeStringArray(structure.parts, 10),
-      connections: normalizeStringArray(structure.connections, 10),
-      visibleEvidence: normalizeStringArray(structure.visibleEvidence, 10)
-    },
-    mounting: {
-      mountType: cleanPromptText(mounting.mountType || ''),
-      supportSurface: normalizeStringArray(mounting.supportSurface, 8),
-      placement: normalizeStringArray(mounting.placement, 8),
-      connectionType: cleanPromptText(mounting.connectionType || ''),
-      relationship: normalizeStringArray(mounting.relationship, 10),
-      allowed: normalizeStringArray(mounting.allowed, 10),
-      forbidden: normalizeStringArray(mounting.forbidden, 10)
+      mainParts: normalizeStringArray(structure.mainParts || structure.parts, 12),
+      importantRelationships: normalizeStringArray(structure.importantRelationships || structure.connections, 12)
     },
     usage: {
-      useMode: cleanPromptText(usage.useMode || ''),
-      supportObject: normalizeStringArray(usage.supportObject, 8),
-      contactPoint: normalizeStringArray(usage.contactPoint, 8),
-      spatialRelationship: normalizeStringArray(usage.spatialRelationship, 10),
-      effectDirection: normalizeStringArray(usage.effectDirection, 8),
-      requiredVisibleEvidence: normalizeStringArray(usage.requiredVisibleEvidence, 10),
-      forbiddenSpatialRelations: normalizeStringArray(usage.forbiddenSpatialRelations, 10)
+      usageScenario: cleanPromptText(usage.usageScenario || usage.useMode || ''),
+      userInteraction: cleanPromptText(
+        usage.userInteraction ||
+          [
+            ...normalizeStringArray(usage.supportObject, 8),
+            ...normalizeStringArray(usage.contactPoint, 8),
+            ...normalizeStringArray(usage.spatialRelationship, 10),
+            ...normalizeStringArray(usage.effectDirection, 8),
+            ...normalizeStringArray(usage.requiredVisibleEvidence, 8)
+          ].join('; ')
+      )
     },
-    relationships: {
-      mustKeep: normalizeStringArray(relationships.mustKeep, 10)
+    productRules: {
+      mustKeep: normalizeStringArray(productRules.mustKeep || blueprint.relationships?.mustKeep, 12),
+      forbidden: normalizeStringArray(productRules.forbidden || blueprint.mounting?.forbidden, 12)
     },
-    behavior: {
-      motion: normalizeStringArray(behavior.motion, 8),
-      adjustment: normalizeStringArray(behavior.adjustment, 8)
-    },
+    installationRules: compactObject({
+      mountType: cleanPromptText(installationRules.mountType || blueprint.mounting?.mountType || ''),
+      supportSurface: normalizeStringArray(installationRules.supportSurface || blueprint.mounting?.supportSurface, 8),
+      placement: normalizeStringArray(installationRules.placement || blueprint.mounting?.placement, 8),
+      allowed: normalizeStringArray(installationRules.allowed || blueprint.mounting?.allowed, 10),
+      relationship: normalizeStringArray(installationRules.relationship || blueprint.mounting?.relationship, 10)
+    }),
+    bundleRules: compactObject({
+      includedItems: normalizeStringArray(bundleRules.includedItems, 16),
+      quantity: cleanPromptText(bundleRules.quantity || ''),
+      arrangement: cleanPromptText(bundleRules.arrangement || '')
+    }),
+    appearanceRules: compactObject({
+      pairMustMatch: Boolean(appearanceRules.pairMustMatch),
+      shape: cleanPromptText(appearanceRules.shape || ''),
+      texture: cleanPromptText(appearanceRules.texture || '')
+    }),
     reference: {
-      primaryReference: cleanPromptText(reference.primaryReference || 'Primary product image'),
-      secondaryReference: cleanPromptText(reference.secondaryReference || 'Supporting product images'),
-      styleReference: cleanPromptText(reference.styleReference || 'Style references'),
+      primary: cleanPromptText(reference.primary || reference.primaryReference || 'Primary product image'),
+      supporting: normalizeStringArray(reference.supporting, 8),
       rules: normalizeStringArray(reference.rules, 8)
     },
-    confidence: {
-      appearance: normalizeConfidenceValue(confidence.appearance),
-      structure: normalizeConfidenceValue(confidence.structure),
-      mounting: normalizeConfidenceValue(confidence.mounting)
-    },
-    uncertainties: normalizeStringArray(blueprint.uncertainties, 8)
+    executionCompatibility: {
+      legacyReferenceRules: normalizeStringArray(reference.rules, 8)
+    }
   }
 }
 
@@ -827,16 +834,19 @@ function summarizeProductTruth(productBlueprint = {}) {
   }
 
   add('product', productBlueprint.identity?.productType)
-  add('real colors', productBlueprint.appearance?.primaryColor)
-  add('visible parts', productBlueprint.structure?.parts)
-  add('part connections', productBlueprint.structure?.connections)
-  add('distinctive visual features', productBlueprint.appearance?.distinctiveFeatures)
+  add('core purpose', productBlueprint.identity?.corePurpose)
+  add('real colors', productBlueprint.appearance?.color)
+  add('material', productBlueprint.appearance?.material)
+  add('visible parts', productBlueprint.structure?.mainParts)
+  add('part relationships', productBlueprint.structure?.importantRelationships)
+  add('must keep', productBlueprint.productRules?.mustKeep)
+  add('forbidden', productBlueprint.productRules?.forbidden)
   return facts
 }
 
 function getExactCopyInstruction(listing, imagePlan) {
   const copyLines = summarizeCopyLines(imagePlan)
-  if (!imagePlan?.allowTextOverlay || copyLines.length === 0) {
+  if (copyLines.length === 0) {
     return 'Do not add on-image text, labels, icons, badges, logos, or decorative lettering unless the strategy explicitly requires them.'
   }
 
@@ -909,7 +919,7 @@ function crc32(buffer) {
 }
 
 function summarizeCopyLines(imagePlan = {}) {
-  return imagePlan?.allowTextOverlay && Array.isArray(imagePlan?.copy)
+  return Array.isArray(imagePlan?.copy)
     ? imagePlan.copy.map((item) => cleanPromptText(item)).filter(Boolean).slice(0, 2)
     : []
 }
@@ -938,6 +948,7 @@ function buildPromptWithLimit(coreSections = [], optionalSections = [], suffix =
 
 export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const sourcePrompt = plan?.strategyContent || ''
+  const sourceExecutionRules = normalizeStringArray(plan?.executionRules || plan?.constraints, 12).join('\n')
   const promptEn = plan?.promptEn || ''
 
   if (promptEn && !plan.promptDirty) {
@@ -949,7 +960,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
     }
   }
 
-  if (!containsChinese(sourcePrompt)) {
+  if (!containsChinese(sourcePrompt) && !containsChinese(sourceExecutionRules)) {
     return {
       ...plan,
       prompt: sourcePrompt,
@@ -968,7 +979,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const targetLanguage = getTargetImageLanguage(listing)
   const cacheKey = crypto
     .createHash('sha256')
-    .update([model, targetLanguage, sourcePrompt].join('\n'))
+    .update([model, targetLanguage, sourcePrompt, sourceExecutionRules].join('\n'))
     .digest('hex')
   const cachedTranslation = strategyTranslationCache.get(cacheKey)
   if (cachedTranslation) {
@@ -983,16 +994,26 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
 
   const productBlueprint = getProductBlueprint(listing)
 
-  const userMessage = [
+  const userMessageSections = [
     'Target language: English',
     'Product terminology that must remain exact:',
     '- Product type: ' + (productBlueprint.identity?.productType || 'Product'),
-    '- Key parts: ' + normalizeStringArray(productBlueprint.structure?.parts, 12).join(', '),
-    '- Target image text language: ' + targetLanguage,
+    '- Key parts: ' + normalizeStringArray(productBlueprint.structure?.mainParts || productBlueprint.structure?.parts, 12).join(', '),
+    '- Target image text language: ' + targetLanguage
+  ]
+  if (sourceExecutionRules) {
+    userMessageSections.push('- Hard execution rules that must remain exact:', sourceExecutionRules)
+  }
+  userMessageSections.push(
     '',
     'Canonical Chinese strategy:',
     sourcePrompt
-  ].join('\n')
+  )
+  if (sourceExecutionRules) {
+    userMessageSections.push('', 'Canonical Chinese execution rules:', sourceExecutionRules)
+  }
+
+  const userMessage = userMessageSections.join('\n')
 
   const response = await postJsonWithRetry(
     baseUrl + '/chat/completions',
@@ -1002,7 +1023,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
         {
           role: 'system',
           content:
-            'You are a faithful strategy translator. Translate the canonical Chinese image strategy into English for an image model. Preserve every requirement, relationship, selling point, prohibition, success condition, and exact quoted on-image copy. Do not add a layout, claim, feature, object, style, or instruction. Do not remove or summarize content. This is translation, not replanning. Return only the English translation.'
+            'You are a controlled visual strategy converter. Convert the canonical Chinese image strategy and execution rules into natural English for an image model. Preserve every requirement, relationship, selling focus, prohibition, execution rule, and exact quoted on-image copy. You may convert Chinese concepts into natural visual English, but you may not add new objects, scene elements, claims, layout decisions, product features, or instructions that are not already supported by the Chinese strategy and execution rules. Do not remove or summarize content. This is controlled visual conversion, not replanning. Return only the English execution strategy.'
         },
         {
           role: 'user',
@@ -1017,7 +1038,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
         Authorization: 'Bearer ' + apiKey,
         'Content-Type': 'application/json'
       },
-      timeout: 60000
+      timeout: Number(process.env.STRATEGY_TRANSLATION_TIMEOUT_MS || 180000)
     },
     {
       maxAttempts: 2,
@@ -1071,20 +1092,20 @@ export function buildAmazonPrompt(
   const truthFacts = summarizeProductTruth(productBlueprint)
   const visibleEvidence = normalizeStringArray(
     [
-      ...(productBlueprint.structure?.visibleEvidence || []),
-      ...(productBlueprint.usage?.requiredVisibleEvidence || []),
-      ...(productBlueprint.mounting?.relationship || [])
+      ...(productBlueprint.structure?.importantRelationships || []),
+      ...(productBlueprint.productRules?.mustKeep || []),
+      ...(productBlueprint.installationRules?.relationship || []),
+      ...(productBlueprint.bundleRules?.includedItems || [])
     ],
-    8
+    10
   )
-  const negativeFacts = normalizeStringArray(
-    [
-      ...(productBlueprint.mounting?.forbidden || []),
-      ...(productBlueprint.usage?.forbiddenSpatialRelations || []),
-      ...productBlueprint.uncertainties
-    ],
-    8
-  )
+  const negativeFacts = normalizeStringArray(productBlueprint.productRules?.forbidden || [], 10)
+  const executionRules = normalizeStringArray(imagePlan?.executionRules || imagePlan?.constraints, 10)
+  const complexityLine = {
+    L1: 'Keep the visual expression simple, direct, low-density, and easy to read at a glance. Avoid unnecessary decorative layers or extra proof panels.',
+    L2: 'Use a balanced ecommerce layout with one clear primary proof and limited supporting information.',
+    L3: 'Allow richer supporting proof, stronger scene integration, and denser but still controlled information hierarchy without changing the strategy mission.'
+  }[String(complexity || 'L2').toUpperCase()] || 'Use a balanced ecommerce layout with one clear primary proof and limited supporting information.'
   const coreSections = [
     'Render one square Amazon-ready product image at ' + resolution + '.',
     'Use the primary product reference as the highest truth source for product identity, shape, structure, proportion, color, material appearance, and included parts.',
@@ -1092,8 +1113,10 @@ export function buildAmazonPrompt(
     truthFacts.length > 0 ? 'Confirmed product truth: ' + truthFacts.join(' | ') + '.' : '',
     visibleEvidence.length > 0 ? 'Visible proof that must appear: ' + visibleEvidence.join(' | ') + '.' : '',
     negativeFacts.length > 0 ? 'Hard visual exclusions: ' + negativeFacts.join(' | ') + '.' : '',
+    executionRules.length > 0 ? 'Execution protection rules: ' + executionRules.join(' | ') + '.' : '',
     formatReferenceRoles(referenceImageRoles) ? 'Reference image order: ' + formatReferenceRoles(referenceImageRoles) + '.' : '',
     'Treat the following strategy as the single execution truth. Do not add new meaning, new selling points, new layout logic, new scene logic, or new claims beyond it.',
+    complexityLine,
     executionHint ? 'Execute this strategy exactly: ' + executionHint + '.' : '',
     getExactCopyInstruction(listing, imagePlan)
   ]

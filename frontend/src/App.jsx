@@ -314,8 +314,8 @@ function App() {
           ? MAIN_IMAGE_FIXED_RULE
           : plan.strategyContent || '',
       imageRole: plan.imageRole || '',
-      buyerQuestion: plan.buyerQuestion || '',
-      primarySellingPoint: plan.primarySellingPoint || '',
+      sellingFocus: plan.sellingFocus || plan.primarySellingPoint || '',
+      executionRules: plan.executionRules || plan.constraints || [],
       promptEn: plan.promptEn || '',
       promptDirty: false
     }))
@@ -427,12 +427,16 @@ function App() {
       return
     }
 
-    const syncedPlans = await syncStrategyTranslations(allPlans)
-    if (!syncedPlans) {
+    const plansNeedingSavedPrompt = allPlans.filter(
+      (plan) =>
+        plan.taskType !== 'main' &&
+        (plan.promptDirty || !String(plan.promptEn || '').trim())
+    )
+    if (plansNeedingSavedPrompt.length > 0) {
+      alert(`以下图片的英文执行稿未保存：${plansNeedingSavedPrompt.map(p => `图${p.id}`).join(', ')}。请先保存英文执行稿后再生成。`)
       setGenerating(false)
       return
     }
-    allPlans = syncedPlans
 
     const taskId = Date.now()
     setCurrentTaskId(taskId)
@@ -448,19 +452,9 @@ function App() {
         status: 'pending',
         imageUrl: null,
         imageRole: plan.imageRole || '',
-        buyerQuestion: plan.buyerQuestion || '',
-        primarySellingPoint: plan.primarySellingPoint || '',
-        goal: plan.goal || '',
-        layout: plan.layout || '',
-        focus: plan.focus || '',
-        textDensity: plan.textDensity || '',
-        style: plan.style || '',
-        visualKeywords: plan.visualKeywords || [],
-        constraints: plan.constraints || [],
-        hardConstraints: plan.hardConstraints || [],
+        sellingFocus: plan.sellingFocus || plan.primarySellingPoint || '',
+        executionRules: plan.executionRules || plan.constraints || [],
         copy: plan.copy || [],
-        allowTextOverlay: Boolean(plan.allowTextOverlay),
-        visualBlueprint: plan.visualBlueprint || null,
         strategyContent: plan.strategyContent || '',
         promptEn: plan.promptEn || '',
         promptDirty: plan.promptDirty || false,
@@ -567,8 +561,7 @@ function App() {
                           name: generatedImage.name || img.name,
                           taskType: generatedImage.taskType || img.taskType,
                           imageRole: generatedImage.imageRole || img.imageRole || '',
-                          buyerQuestion: generatedImage.buyerQuestion || img.buyerQuestion || '',
-                          primarySellingPoint: generatedImage.primarySellingPoint || img.primarySellingPoint || '',
+                          sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
                           error: null,
                           strategyContent: generatedImage.promptZh || img.strategyContent || '',
                           promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
@@ -664,19 +657,9 @@ function App() {
       type: image.taskType,
       taskType: image.taskType,
       imageRole: image.imageRole || '',
-      buyerQuestion: image.buyerQuestion || '',
-      primarySellingPoint: image.primarySellingPoint || '',
-      goal: image.goal || '',
-      layout: image.layout || '',
-      focus: image.focus || '',
-      textDensity: image.textDensity || '',
-      style: image.style || '',
-      visualKeywords: image.visualKeywords || [],
-      constraints: image.constraints || [],
-      hardConstraints: image.hardConstraints || [],
+      sellingFocus: image.sellingFocus || image.primarySellingPoint || '',
+      executionRules: image.executionRules || image.constraints || [],
       copy: image.copy || [],
-      allowTextOverlay: Boolean(image.allowTextOverlay),
-      visualBlueprint: image.visualBlueprint || null,
       strategyContent: requestedPrompt,
       promptEn: strategyChanged ? '' : image.promptEn,
       promptDirty: strategyChanged,
@@ -767,8 +750,7 @@ function App() {
                     name: generatedImage.name || img.name,
                     taskType: generatedImage.taskType || img.taskType,
                     imageRole: generatedImage.imageRole || img.imageRole || '',
-                    buyerQuestion: generatedImage.buyerQuestion || img.buyerQuestion || '',
-                    primarySellingPoint: generatedImage.primarySellingPoint || img.primarySellingPoint || '',
+                    sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
                     error: null,
                     strategyContent: generatedImage.promptZh || requestedPrompt,
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
@@ -854,19 +836,9 @@ function App() {
         type: img.taskType,
         taskType: img.taskType,
         imageRole: img.imageRole || '',
-        buyerQuestion: img.buyerQuestion || '',
-        primarySellingPoint: img.primarySellingPoint || '',
-        goal: img.goal || '',
-        layout: img.layout || '',
-        focus: img.focus || '',
-        textDensity: img.textDensity || '',
-        style: img.style || '',
-        visualKeywords: img.visualKeywords || [],
-        constraints: img.constraints || [],
-        hardConstraints: img.hardConstraints || [],
+        sellingFocus: img.sellingFocus || img.primarySellingPoint || '',
+        executionRules: img.executionRules || img.constraints || [],
         copy: img.copy || [],
-        allowTextOverlay: Boolean(img.allowTextOverlay),
-        visualBlueprint: img.visualBlueprint || null,
         strategyContent: img.strategyContent || '',
         promptEn: img.promptEn,
         promptDirty: img.promptDirty
@@ -950,8 +922,7 @@ function App() {
                     name: generatedImage.name || img.name,
                     taskType: generatedImage.taskType || img.taskType,
                     imageRole: generatedImage.imageRole || img.imageRole || '',
-                    buyerQuestion: generatedImage.buyerQuestion || img.buyerQuestion || '',
-                    primarySellingPoint: generatedImage.primarySellingPoint || img.primarySellingPoint || '',
+                    sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
                     error: null,
                     strategyContent: generatedImage.promptZh || img.strategyContent || '',
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,

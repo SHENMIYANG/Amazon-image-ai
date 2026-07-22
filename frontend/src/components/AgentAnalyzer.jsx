@@ -6,7 +6,7 @@ import './AgentAnalyzer.css'
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
-async function waitForUploadedReference(url, maxAttempts = 8, delayMs = 350) {
+async function waitForUploadedReference(url, maxAttempts = 8, delayMs = 500) {
   let lastError = null
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -40,11 +40,11 @@ async function requestAnalysis(listing, referenceImages, primaryReferenceImageUr
     body: JSON.stringify(buildAnalyzeRequest(listing, referenceImages, primaryReferenceImageUrl))
   })
 
-  return await parseApiJson(response, '分析失败')
+  return await parseApiJson(response, '策略分析接口')
 }
 
 async function settleUploadedFiles() {
-  await wait(250)
+  await wait(1000)
 }
 
 async function settleUploadedReferences(referenceImages = []) {
@@ -54,6 +54,7 @@ async function settleUploadedReferences(referenceImages = []) {
     return
   }
 
+  await settleUploadedFiles()
   await Promise.all(targets.map((url) => waitForUploadedReference(url)))
 }
 
@@ -123,7 +124,7 @@ export default function AgentAnalyzer({
           method: 'POST',
           body: formData
         })
-        const uploadData = await parseApiJson(uploadResponse, '产品图片上传失败')
+        const uploadData = await parseApiJson(uploadResponse, '产品图片上传接口')
 
         if (!uploadData.success) {
           throw new Error(uploadData.message || '产品图片上传失败')
@@ -141,13 +142,9 @@ export default function AgentAnalyzer({
       setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图补全详细方案。`)
     } catch (err) {
       console.error('Agent 分析失败:', err)
-      setError(err.message)
-
-      if (String(err.message || '').includes('500') || String(err.message || '').includes('Internal Server Error')) {
-        alert(`服务端内部错误\n\n${err.message}`)
-      } else {
-        alert(`分析失败：${err.message}`)
-      }
+      const message = String(err?.message || '').trim() || '分析失败，请检查后端返回。'
+      setError(message)
+      alert(`分析失败：${message}`)
     } finally {
       setAnalyzing(false)
     }

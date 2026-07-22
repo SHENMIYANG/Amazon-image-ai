@@ -186,7 +186,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
       imageId: image.imageId,
       imageName: image.name || '',
       prompt: image.strategyContent || '',
-      complexity: task?.listing?.complexity || 'L1',
+      complexity: task?.listing?.complexity || 'L2',
       referenceFile: null,
       referencePreviewUrl: ''
     })
@@ -236,7 +236,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
 
     onRegenerate(task, regenerateDialog.imageIndex, {
       prompt,
-      complexity: regenerateDialog.complexity || 'L1',
+      complexity: regenerateDialog.complexity || 'L2',
       referenceFiles: regenerateDialog.referenceFile ? [regenerateDialog.referenceFile] : []
     })
     closeRegenerateDialog()

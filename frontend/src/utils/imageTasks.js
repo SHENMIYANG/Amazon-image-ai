@@ -66,8 +66,8 @@ export const IMAGE_TASK_OPTIONS = [
 
 const TASK_BLUEPRINTS = {
   main: '适合亚马逊主图位，重点是白底、全貌、主体清晰和合规展示。',
-  feature: '围绕单一核心卖点做转化表达，突出利益点，不要一张图塞太多信息。',
-  scenario: '把产品放进真实使用环境，让买家快速理解使用场景和氛围。',
+  feature: '围绕当前图片最重要的购买理由做转化表达，可承载多个强相关卖点，但不要杂乱。',
+  scenario: '把产品放进真实使用环境，用场景证明卖点和使用价值，而不是只做氛围图。',
   detail: '放大展示材质、结构、纹理、做工或关键细节，强化真实质感。',
   dimensions: '清晰表达尺寸、容量、比例关系、适配空间或参照物。',
   steps: '适合讲解安装步骤、使用动作或操作流程，强调顺序清晰。',
@@ -90,13 +90,13 @@ const TASK_PLACEHOLDERS = {
     '【补充示例】希望略带真实落地阴影；标配配件与产品一起整齐展示；不要裁切产品任何边缘。'
   ],
   feature: [
-    '【核心卖点】填写这张图最想突出的 1 条卖点',
-    '【画面方式】局部特写 / 放大结构 / 图标标注 / 功能演示',
-    '【避免】不要一张图塞太多卖点，避免背景和文案抢主体'
+    '【购买理由】填写这张图最想证明的购买理由，可包含多个强相关卖点',
+    '【画面方式】局部特写 / 放大结构 / 图标标注 / 功能演示 / 真实使用证明',
+    '【避免】信息不要杂乱，避免背景和文案抢主体'
   ],
   scenario: [
     '【使用场景】填写真实使用环境，例如花园、厨房、卧室、车内、露台',
-    '【画面重点】产品自然融入场景，突出使用氛围和体验感',
+    '【画面重点】产品自然融入场景，并且要证明真实使用方式或卖点价值',
     '【避免】场景过假、人物抢主体、产品比例失真'
   ],
   detail: [
@@ -203,21 +203,11 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       taskKey: task.taskKey,
       type: task.taskType,
       imageRole: existing?.imageRole || '',
-      buyerQuestion: existing?.buyerQuestion || '',
-      primarySellingPoint: existing?.primarySellingPoint || '',
-      purpose: task.description,
+      sellingFocus: existing?.sellingFocus || existing?.primarySellingPoint || '',
       blueprint: task.blueprint,
-      goal: existing?.goal || '',
-      layout: existing?.layout || '',
-      focus: existing?.focus || '',
-      textDensity: existing?.textDensity || '',
-      style: existing?.style || '',
-      visualKeywords: existing?.visualKeywords || [],
-      constraints: existing?.constraints || [],
-      hardConstraints: existing?.hardConstraints || [],
+      purpose: task.description,
+      executionRules: existing?.executionRules || existing?.constraints || [],
       copy: existing?.copy || [],
-      allowTextOverlay: Boolean(existing?.allowTextOverlay),
-      visualBlueprint: existing?.visualBlueprint || null,
       strategyContent:
         existing?.strategyContent ||
         existing?.strategyBody ||

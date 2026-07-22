@@ -46,6 +46,7 @@ function plansSignature(plans = []) {
       taskType: plan.taskType,
       name: plan.name,
       strategyContent: plan.strategyContent,
+      executionRules: Array.isArray(plan.executionRules) ? plan.executionRules : [],
       placeholder: plan.placeholder,
       promptDirty: plan.promptDirty
     }))
@@ -69,6 +70,10 @@ function getAdditionalInfoPlaceholder() {
 【使用方式/步骤】：首次使用前先充电 4-6 小时
 【场景图要求】：希望展示花园、露台、夜间氛围
 【特殊要求】：不要品牌 Logo，不要夸张特效，不要裁掉产品全貌`
+}
+
+function getExecutionRulesPlaceholder() {
+  return ['例如：', '对准产品与使用物体的真实接触位。', '关键配件必须清楚可见。', '禁止穿模、悬空或新增不存在结构。'].join('\n')
 }
 
 export default function AmazonListingForm({
@@ -109,6 +114,27 @@ export default function AmazonListingForm({
               ...plan,
               strategyContent: prompt,
               prompt,
+              promptEn: '',
+              promptDirty: true
+            }
+          : plan
+      )
+    )
+  }
+
+  const handleExecutionRulesChange = (imageId, value) => {
+    const executionRules = String(value || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    onChange(
+      'imagePlans',
+      imagePlans.map((plan) =>
+        plan.id === imageId
+          ? {
+              ...plan,
+              executionRules,
               promptEn: '',
               promptDirty: true
             }
@@ -272,7 +298,7 @@ export default function AmazonListingForm({
           </div>
 
           <ComplexitySelector
-            selected={listing.complexity || 'L1'}
+            selected={listing.complexity || 'L2'}
             onChange={(value) => onChange('complexity', value)}
           />
 
@@ -349,6 +375,22 @@ export default function AmazonListingForm({
                         onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
                         rows={plan.taskType === 'main' ? 6 : 8}
                       />
+
+                      {plan.taskType !== 'main' ? (
+                        <div className="image-plan-execution-block">
+                          <div className="image-plan-execution-block__header">
+                            <span className="image-plan-execution-block__tag">执行保护</span>
+                            <small>给生图模型看的硬约束，按行填写</small>
+                          </div>
+                          <textarea
+                            className="image-plan-execution-textarea"
+                            value={(plan.executionRules || []).join('\n')}
+                            placeholder={getExecutionRulesPlaceholder()}
+                            onChange={(event) => handleExecutionRulesChange(plan.id, event.target.value)}
+                            rows={3}
+                          />
+                        </div>
+                      ) : null}
 
                       {plan.taskType !== 'main' ? (
                         <div className="image-plan-actions">
