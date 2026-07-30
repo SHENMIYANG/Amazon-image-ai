@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import ImageFeedbackChat from './ImageFeedbackChat'
 import './TaskGrid.css'
 
 const MAX_REFERENCE_SIZE = 10 * 1024 * 1024
@@ -55,6 +56,17 @@ function Icon({ name }) {
         <path d="M3 12a9 9 0 1 0 3-6.7" />
         <path d="M3 4v5h5" />
         <path d="M12 7v5l3 2" />
+      </svg>
+    )
+  }
+
+  if (name === 'chat') {
+    return (
+      <svg {...commonProps}>
+        <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 1 1 21 12Z" />
+        <path d="M8 12h.01" />
+        <path d="M12 12h.01" />
+        <path d="M16 12h.01" />
       </svg>
     )
   }
@@ -140,6 +152,8 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
   const [previewState, setPreviewState] = useState(null)
   const [previewZoom, setPreviewZoom] = useState(1)
   const [regenerateDialog, setRegenerateDialog] = useState(null)
+  const [feedbackDialog, setFeedbackDialog] = useState(null)
+  const [feedbackChats, setFeedbackChats] = useState({})
   const [dialogError, setDialogError] = useState('')
 
   const completedImages = task.images?.filter((image) => image.status === 'completed' && image.imageUrl) || []
@@ -166,6 +180,23 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
   const handleClosePreview = () => {
     setPreviewState(null)
     setPreviewZoom(1)
+  }
+
+  const openFeedbackDialog = (imageIndex) => {
+    const image = task.images?.[imageIndex]
+    if (!image) return
+    setFeedbackDialog({ imageIndex, imageId: image.imageId })
+  }
+
+  const closeFeedbackDialog = () => {
+    setFeedbackDialog(null)
+  }
+
+  const updateFeedbackChat = (imageId, nextState) => {
+    setFeedbackChats((previous) => ({
+      ...previous,
+      [imageId]: nextState
+    }))
   }
 
   const closeRegenerateDialog = () => {
@@ -338,6 +369,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                         {variantCount}
                       </ActionIconButton>
                     ) : null}
+                    <ActionIconButton icon="chat" label="图片反馈对话" onClick={() => openFeedbackDialog(index)} />
                   </>
                 ) : null}
                 {image.status !== 'pending' && image.status !== 'regenerating' ? (
@@ -382,6 +414,25 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
             </div>
           </div>
         </div>
+      ) : null}
+
+      {feedbackDialog ? (
+        <ImageFeedbackChat
+          task={task}
+          image={task.images?.[feedbackDialog.imageIndex]}
+          chatState={feedbackChats[feedbackDialog.imageId]}
+          onChange={(nextState) => updateFeedbackChat(feedbackDialog.imageId, nextState)}
+          onRegenerate={(revision) => onRegenerate?.(task, feedbackDialog.imageIndex, {
+            prompt: revision.strategyContent,
+            promptEn: revision.promptEn,
+            executionRules: revision.executionRules,
+            complexity: task?.listing?.complexity || 'L2',
+            suppressAlert: true,
+            source: 'feedback-chat'
+          })}
+          onDownload={onDownload}
+          onClose={closeFeedbackDialog}
+        />
       ) : null}
 
       {regenerateDialog ? (

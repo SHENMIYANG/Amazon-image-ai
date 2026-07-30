@@ -144,6 +144,8 @@ function buildImageVersionSnapshot(image = {}) {
     imageUrl: image.imageUrl,
     strategyContent: image.strategyContent || '',
     promptEn: image.promptEn || '',
+    promptUsed: image.promptUsed || image.executionPromptEn || image.prompt || '',
+    executionPromptEn: image.executionPromptEn || image.promptUsed || image.prompt || '',
     actualResolution: image.actualResolution || null,
     requestedResolution: image.requestedResolution || null,
     sizeMatchesRequest: image.sizeMatchesRequest,
@@ -589,6 +591,9 @@ function App() {
                           error: null,
                           strategyContent: generatedImage.promptZh || img.strategyContent || '',
                           promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
+                          promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
+                          executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
+                          prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
                           promptDirty: false,
                           versions: img.versions || [],
                           regenerationError: null,
@@ -670,6 +675,8 @@ function App() {
     const requestedPrompt = String(options.prompt ?? image.strategyContent ?? '').trim()
     const requestedComplexity = String(options.complexity || task?.listing?.complexity || listing.complexity || 'L2').trim()
     const referenceFiles = Array.isArray(options.referenceFiles) ? options.referenceFiles.slice(0, 1) : []
+    const providedExecutionRules = Array.isArray(options.executionRules) ? options.executionRules : null
+    const providedPromptEn = String(options.promptEn || '').trim()
     const strategyChanged = requestedPrompt !== String(image.strategyContent || '').trim()
     
     const planToUse = {
@@ -679,11 +686,11 @@ function App() {
       taskType: image.taskType,
       imageRole: image.imageRole || '',
       sellingFocus: image.sellingFocus || image.primarySellingPoint || '',
-      executionRules: image.executionRules || image.constraints || [],
+      executionRules: providedExecutionRules || image.executionRules || image.constraints || [],
       copy: image.copy || [],
       strategyContent: requestedPrompt,
-      promptEn: strategyChanged ? '' : image.promptEn,
-      promptDirty: strategyChanged,
+      promptEn: providedPromptEn || (strategyChanged ? '' : image.promptEn),
+      promptDirty: providedPromptEn ? false : strategyChanged,
       regenerationMode: true
     }
     
@@ -765,6 +772,9 @@ function App() {
                     error: null,
                     strategyContent: generatedImage.promptZh || requestedPrompt,
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
+                    promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
+                    executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
+                    prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
                     promptDirty: false,
                     versions: nextVersions,
                     regenerationError: null,
@@ -787,9 +797,12 @@ function App() {
           }
           return t
       }))
+      return generatedImage
     } catch (error) {
       console.error('重新生成失败:', error)
-      alert(`图${image.imageId} 重新生成失败：${error.message}`)
+      if (!options.suppressAlert) {
+        alert(`图${image.imageId} 重新生成失败：${error.message}`)
+      }
       
       setTasks(prev => prev.map(t => {
         if (t.id === task.id) {
@@ -807,9 +820,10 @@ function App() {
               return img
             })
           }
-        }
-        return t
+          }
+          return t
       }))
+      return null
     } finally {
       setGenerating(false)
       setCurrentTaskId(null)
@@ -924,6 +938,9 @@ function App() {
                     error: null,
                     strategyContent: generatedImage.promptZh || img.strategyContent || '',
                     promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
+                    promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
+                    executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
+                    prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
                     promptDirty: false,
                     versions: img.versions || [],
                     regenerationError: null,
