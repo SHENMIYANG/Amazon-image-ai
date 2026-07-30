@@ -48,7 +48,7 @@ async function settleUploadedFiles() {
 }
 
 async function settleUploadedReferences(referenceImages = []) {
-  const targets = Array.isArray(referenceImages) ? referenceImages.filter(Boolean).slice(0, 3) : []
+  const targets = Array.isArray(referenceImages) ? referenceImages.filter(Boolean).slice(0, 8) : []
   if (targets.length === 0) {
     await settleUploadedFiles()
     return

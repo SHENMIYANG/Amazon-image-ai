@@ -103,6 +103,40 @@ async function uploadReferenceFiles(files = [], label = '参考图上传接口')
   return data.images.map((image) => image.url)
 }
 
+async function requestGeneratedImage({
+  listing,
+  plan,
+  resolution,
+  referenceImages,
+  primaryReferenceImageUrl,
+  regenerationReferenceImages = [],
+  label
+}) {
+  const generateResponse = await fetch('/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(
+      buildGenerateRequest(
+        listing,
+        plan,
+        resolution,
+        referenceImages,
+        primaryReferenceImageUrl,
+        regenerationReferenceImages
+      )
+    )
+  })
+  const data = await parseApiJson(generateResponse, label)
+  const generatedImage = data.images && data.images[0]
+  const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
+
+  if (!realSuccess) {
+    throw new Error(generatedImage?.error || data.message || '生成失败')
+  }
+
+  return generatedImage
+}
+
 function buildImageVersionSnapshot(image = {}) {
   if (!image?.imageUrl) return null
 
@@ -529,26 +563,16 @@ function App() {
         }))
         
         try {
-          const generateResponse = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(
-              buildGenerateRequest(
-                listingSnapshot,
-                plan,
-                selectedResolution,
-                referenceImages,
-                primaryReferenceImageUrl
-              )
-            )
+          const generatedImage = await requestGeneratedImage({
+            listing: listingSnapshot,
+            plan,
+            resolution: selectedResolution,
+            referenceImages,
+            primaryReferenceImageUrl,
+            label: `图片生成接口（图${plan.id}）`
           })
-          const data = await parseApiJson(generateResponse, `图片生成接口（图${plan.id}）`)
-          
-          const generatedImage = data.images && data.images[0]
-          const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
 
-          if (realSuccess) {
-            setTasks(prev => prev.map(task => {
+          setTasks(prev => prev.map(task => {
               if (task.id === taskId) {
                 return {
                   ...task,
@@ -577,10 +601,7 @@ function App() {
                 }
               }
               return task
-            }))
-          } else {
-            throw new Error(generatedImage?.error || data.message || '生成失败')
-          }
+          }))
         } catch (error) {
         console.error(`图${plan.id} 生成失败:`, error)
           
@@ -713,27 +734,17 @@ function App() {
         ...(task.referenceImages || []),
         ...additionalReferenceImages
       ].filter((url, index, source) => url && source.indexOf(url) === index)
-      const generateResponse = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          buildGenerateRequest(
-            taskListing,
-            planToUse,
-            task.resolution || selectedResolution,
-            regenerationReferenceImages,
-            primaryReferenceImageUrl,
-            additionalReferenceImages
-          )
-        )
+      const generatedImage = await requestGeneratedImage({
+        listing: taskListing,
+        plan: planToUse,
+        resolution: task.resolution || selectedResolution,
+        referenceImages: regenerationReferenceImages,
+        primaryReferenceImageUrl,
+        regenerationReferenceImages: additionalReferenceImages,
+        label: `图片生成接口（图${image.imageId}）`
       })
-      const data = await parseApiJson(generateResponse, `图片生成接口（图${image.imageId}）`)
-      
-      const generatedImage = data.images && data.images[0]
-      const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
 
-      if (realSuccess) {
-        setTasks(prev => prev.map(t => {
+      setTasks(prev => prev.map(t => {
           if (t.id === task.id) {
             return {
               ...t,
@@ -775,10 +786,7 @@ function App() {
             }
           }
           return t
-        }))
-      } else {
-        throw new Error(generatedImage?.error || data.message || '生成失败')
-      }
+      }))
     } catch (error) {
       console.error('重新生成失败:', error)
       alert(`图${image.imageId} 重新生成失败：${error.message}`)
@@ -891,26 +899,16 @@ function App() {
       }))
       
       try {
-        const generateResponse = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildGenerateRequest(
-              task.listing,
-              plan,
-              task.resolution,
-              referenceImages,
-              primaryReferenceImageUrl
-            )
-          )
+        const generatedImage = await requestGeneratedImage({
+          listing: task.listing,
+          plan,
+          resolution: task.resolution,
+          referenceImages,
+          primaryReferenceImageUrl,
+          label: `图片生成接口（图${plan.id}）`
         })
-        const data = await parseApiJson(generateResponse, `图片生成接口（图${plan.id}）`)
-        
-        const generatedImage = data.images && data.images[0]
-        const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
 
-        if (realSuccess) {
-          setTasks(prev => prev.map(t => {
+        setTasks(prev => prev.map(t => {
             if (t.id === task.id) {
               return {
                 ...t,
@@ -937,10 +935,7 @@ function App() {
               }
             }
             return t
-          }))
-        } else {
-          throw new Error(generatedImage?.error || data.message || '生成失败')
-        }
+        }))
       } catch (error) {
         console.error(`图${plan.id} 生成失败:`, error)
         setTasks(prev => prev.map(t => {
@@ -987,9 +982,31 @@ function App() {
   }
 
   const handleDownload = async (imageUrl, filename, requestedResolution) => {
+    const resolveDownloadUrl = (url) => {
+      const parsedUrl = new URL(url, window.location.origin)
+
+      if (
+        ['localhost', '127.0.0.1'].includes(parsedUrl.hostname) &&
+        !['localhost', '127.0.0.1'].includes(window.location.hostname)
+      ) {
+        return parsedUrl.pathname + parsedUrl.search
+      }
+
+      return parsedUrl.href
+    }
+
     try {
-      const response = await fetch(imageUrl)
+      const downloadUrl = resolveDownloadUrl(imageUrl)
+      const response = await fetch(downloadUrl, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(`图片文件不可访问（HTTP ${response.status}）`)
+      }
+
       const blob = await response.blob()
+      if (!blob || blob.size === 0) {
+        throw new Error('图片文件为空，可能已被服务器清理')
+      }
+
       let downloadBlob = blob
 
       try {
@@ -1008,7 +1025,7 @@ function App() {
       window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error('下载失败:', error)
-      alert('下载失败：' + error.message)
+      alert('下载失败：' + (error.message === 'Failed to fetch' ? '图片地址无法访问，请刷新页面或确认服务器 /uploads 代理正常。' : error.message))
     }
   }
   const handleDownloadAll = async (images) => {

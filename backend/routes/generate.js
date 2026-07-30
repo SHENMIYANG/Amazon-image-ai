@@ -133,19 +133,19 @@ router.post('/', async (req, res) => {
         const normalizedPlan = taskType === 'main' && !plan.regenerationMode
           ? { ...plan, originalPrompt: plan.strategyContent || '' }
           : await translatePlanPromptIfNeeded(plan, executionListing, size)
+        const taskReferenceAssets = selectReferenceAssetsForTask({
+          taskType,
+          refImagePaths,
+          orderedReferenceRoles
+        })
         const prompt = buildAmazonPrompt(
           executionListing,
           normalizedPlan,
           executionComplexity || 'L2',
           size,
           explicitPrimaryReferenceImageUrl,
-          orderedReferenceRoles
+          taskReferenceAssets.orderedReferenceRoles
         )
-        const taskReferenceAssets = selectReferenceAssetsForTask({
-          taskType,
-          refImagePaths,
-          orderedReferenceRoles
-        })
 
         const generatedImage = await callGPTImage2({
           prompt,
@@ -196,7 +196,11 @@ router.post('/', async (req, res) => {
             executionComplexity || 'L2',
             size,
             explicitPrimaryReferenceImageUrl,
-            orderedReferenceRoles
+            selectReferenceAssetsForTask({
+              taskType: plan.taskType || plan.type || 'feature',
+              refImagePaths,
+              orderedReferenceRoles
+            }).orderedReferenceRoles
           )
         })
       }
@@ -774,7 +778,13 @@ function getProductBlueprint(listing = {}) {
             ...normalizeStringArray(usage.effectDirection, 8),
             ...normalizeStringArray(usage.requiredVisibleEvidence, 8)
           ].join('; ')
-      )
+      ),
+      supportObject: normalizeStringArray(usage.supportObject, 8),
+      contactPoint: normalizeStringArray(usage.contactPoint, 8),
+      spatialRelationship: normalizeStringArray(usage.spatialRelationship, 10),
+      effectDirection: normalizeStringArray(usage.effectDirection, 8),
+      requiredVisibleEvidence: normalizeStringArray(usage.requiredVisibleEvidence, 10),
+      forbiddenSpatialRelations: normalizeStringArray(usage.forbiddenSpatialRelations || usage.forbidden, 10)
     },
     productRules: {
       mustKeep: normalizeStringArray(productRules.mustKeep || blueprint.relationships?.mustKeep, 12),
@@ -785,7 +795,8 @@ function getProductBlueprint(listing = {}) {
       supportSurface: normalizeStringArray(installationRules.supportSurface || blueprint.mounting?.supportSurface, 8),
       placement: normalizeStringArray(installationRules.placement || blueprint.mounting?.placement, 8),
       allowed: normalizeStringArray(installationRules.allowed || blueprint.mounting?.allowed, 10),
-      relationship: normalizeStringArray(installationRules.relationship || blueprint.mounting?.relationship, 10)
+      relationship: normalizeStringArray(installationRules.relationship || blueprint.mounting?.relationship, 10),
+      forbidden: normalizeStringArray(installationRules.forbidden || blueprint.mounting?.forbidden, 10)
     }),
     bundleRules: compactObject({
       includedItems: normalizeStringArray(bundleRules.includedItems, 16),
@@ -839,9 +850,64 @@ function summarizeProductTruth(productBlueprint = {}) {
   add('material', productBlueprint.appearance?.material)
   add('visible parts', productBlueprint.structure?.mainParts)
   add('part relationships', productBlueprint.structure?.importantRelationships)
+  add('usage scenario', productBlueprint.usage?.usageScenario)
+  add('user interaction', productBlueprint.usage?.userInteraction)
   add('must keep', productBlueprint.productRules?.mustKeep)
   add('forbidden', productBlueprint.productRules?.forbidden)
   return facts
+}
+
+function summarizeVisualEvidence(productBlueprint = {}) {
+  return normalizeStringArray(
+    [
+      ...(productBlueprint.structure?.importantRelationships || []),
+      ...(productBlueprint.productRules?.mustKeep || []),
+      ...(productBlueprint.usage?.supportObject || []),
+      ...(productBlueprint.usage?.contactPoint || []),
+      ...(productBlueprint.usage?.spatialRelationship || []),
+      ...(productBlueprint.usage?.effectDirection || []),
+      ...(productBlueprint.usage?.requiredVisibleEvidence || []),
+      ...(productBlueprint.installationRules?.relationship || []),
+      ...(productBlueprint.installationRules?.allowed || []),
+      ...(productBlueprint.bundleRules?.includedItems || [])
+    ],
+    14
+  )
+}
+
+function summarizeProductExclusions(productBlueprint = {}) {
+  return normalizeStringArray(
+    [
+      ...(productBlueprint.productRules?.forbidden || []),
+      ...(productBlueprint.usage?.forbiddenSpatialRelations || []),
+      ...(productBlueprint.installationRules?.forbidden || [])
+    ],
+    12
+  )
+}
+
+function summarizeUsageContract(productBlueprint = {}) {
+  const lines = []
+  const add = (label, values) => {
+    const items = Array.isArray(values) ? values.filter(Boolean) : [values].filter(Boolean)
+    if (items.length > 0) lines.push(`${label}: ${items.join(', ')}`)
+  }
+
+  add('real usage scenario', productBlueprint.usage?.usageScenario)
+  add('real user interaction', productBlueprint.usage?.userInteraction)
+  add('support/contact object', productBlueprint.usage?.supportObject)
+  add('contact point', productBlueprint.usage?.contactPoint)
+  add('spatial relationship', productBlueprint.usage?.spatialRelationship)
+  add('effect or force direction', productBlueprint.usage?.effectDirection)
+  add('mount type', productBlueprint.installationRules?.mountType)
+  add('support surface', productBlueprint.installationRules?.supportSurface)
+  add('placement', productBlueprint.installationRules?.placement)
+  add('allowed installation relationship', productBlueprint.installationRules?.relationship)
+  add('bundle contents', productBlueprint.bundleRules?.includedItems)
+  add('bundle quantity', productBlueprint.bundleRules?.quantity)
+  add('bundle arrangement', productBlueprint.bundleRules?.arrangement)
+
+  return lines
 }
 
 function getExactCopyInstruction(listing, imagePlan) {
@@ -1090,16 +1156,9 @@ export function buildAmazonPrompt(
   }
 
   const truthFacts = summarizeProductTruth(productBlueprint)
-  const visibleEvidence = normalizeStringArray(
-    [
-      ...(productBlueprint.structure?.importantRelationships || []),
-      ...(productBlueprint.productRules?.mustKeep || []),
-      ...(productBlueprint.installationRules?.relationship || []),
-      ...(productBlueprint.bundleRules?.includedItems || [])
-    ],
-    10
-  )
-  const negativeFacts = normalizeStringArray(productBlueprint.productRules?.forbidden || [], 10)
+  const usageContract = summarizeUsageContract(productBlueprint)
+  const visibleEvidence = summarizeVisualEvidence(productBlueprint)
+  const negativeFacts = summarizeProductExclusions(productBlueprint)
   const executionRules = normalizeStringArray(imagePlan?.executionRules || imagePlan?.constraints, 10)
   const complexityLine = {
     L1: 'Keep the visual expression simple, direct, low-density, and easy to read at a glance. Avoid unnecessary decorative layers or extra proof panels.',
@@ -1111,6 +1170,7 @@ export function buildAmazonPrompt(
     'Use the primary product reference as the highest truth source for product identity, shape, structure, proportion, color, material appearance, and included parts.',
     'Generate the image from scratch but keep the same real product. Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, duplicate, or omit product parts.',
     truthFacts.length > 0 ? 'Confirmed product truth: ' + truthFacts.join(' | ') + '.' : '',
+    usageContract.length > 0 ? 'Confirmed real-use contract: ' + usageContract.join(' | ') + '.' : '',
     visibleEvidence.length > 0 ? 'Visible proof that must appear: ' + visibleEvidence.join(' | ') + '.' : '',
     negativeFacts.length > 0 ? 'Hard visual exclusions: ' + negativeFacts.join(' | ') + '.' : '',
     executionRules.length > 0 ? 'Execution protection rules: ' + executionRules.join(' | ') + '.' : '',

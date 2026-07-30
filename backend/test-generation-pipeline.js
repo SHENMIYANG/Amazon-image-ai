@@ -61,53 +61,66 @@ function testScenarioUsageContract() {
     productName: 'Clamp reptile heat lamp',
     marketplace: 'UK',
     imageLanguage: 'English',
+    listingInfo: 'RAW LISTING TEXT SHOULD NOT DRIVE FINAL PROMPT',
+    additionalInfo: 'RAW ADDITIONAL INFO SHOULD NOT DRIVE FINAL PROMPT',
     productBlueprint: {
       identity: {
         productType: 'Clamp reptile heat lamp',
+        corePurpose: 'provide directed basking heat and UV light',
         archetype: 'Clamp Mounted Device'
       },
       appearance: { primaryColor: ['black', 'silver'] },
       structure: {
-        parts: ['lamp head', 'gooseneck', 'clamp'],
-        connections: ['lamp head connected to gooseneck', 'gooseneck connected to clamp']
-      },
-      mounting: {
-        mountType: 'clamp',
-        supportSurface: ['vertical glass wall edge'],
-        connectionType: 'mechanical grip'
+        mainParts: ['lamp head', 'gooseneck', 'clamp'],
+        importantRelationships: ['lamp head connected to gooseneck', 'gooseneck connected to clamp']
       },
       usage: {
-        useMode: 'mounted outside a terrarium',
+        usageScenario: 'mounted outside a terrarium',
+        userInteraction: 'user clamps the product to the tank edge and aims the lamp downward',
         supportObject: ['vertical glass wall edge'],
         contactPoint: ['glass edge held between both clamp jaws'],
         spatialRelationship: ['clamp and lamp remain outside the tank'],
         effectDirection: ['lamp head points down toward the basking platform inside'],
         requiredVisibleEvidence: ['both jaws contact opposite sides of the glass edge'],
         forbiddenSpatialRelations: ['clamp penetrating glass', 'clamp parallel to glass without gripping']
+      },
+      installationRules: {
+        mountType: 'clamp',
+        supportSurface: ['vertical glass wall edge'],
+        relationship: ['support edge visibly sandwiched between two clamp jaws'],
+        forbidden: ['floating clamp']
       }
     }
   }
   const plan = {
     taskType: 'scenario',
-    goal: 'Explain correct installation',
-    layout: 'Three-quarter tank corner with the mounting contact fully visible',
-    focus: 'mounting contact',
-    constraints: ['show the contact point'],
-    successCriteria: ['the complete grip is readable without obstruction'],
-    failureCriteria: ['the support edge disappears inside the clamp body'],
-    promptHint: 'STALE SHORT HINT',
-    executionPrompt: 'Use the translated detailed installation direction'
+    strategyContent: '中文策略不应在已有英文执行稿时重新翻译或改写。',
+    promptEn: 'Create a three-quarter terrarium corner image that demonstrates the clamp gripping the outer glass edge correctly.',
+    executionRules: [
+      'Both clamp jaws must visibly grip opposite sides of the glass edge.',
+      'The lamp and clamp must stay outside the tank.',
+      'No part of the product may penetrate, float, or fuse with the glass.'
+    ]
   }
-  const prompt = buildAmazonPrompt(listing, plan, 'L1', '2048x2048', '/uploads/main.png')
+  const prompt = buildAmazonPrompt(
+    listing,
+    plan,
+    'L1',
+    '2048x2048',
+    '/uploads/main.png',
+    [{ index: 1, role: 'primary_product' }, { index: 2, role: 'supporting_product' }]
+  )
 
   assert.match(prompt, /glass edge held between both clamp jaws/)
   assert.match(prompt, /clamp and lamp remain outside the tank/)
   assert.match(prompt, /clamp penetrating glass/)
-  assert.match(prompt, /Required scene composition: Three-quarter tank corner/)
-  assert.match(prompt, /Success is visible only when/)
-  assert.match(prompt, /Use the translated detailed installation direction/)
-  assert.doesNotMatch(prompt, /STALE SHORT HINT/)
-  assert.ok(prompt.length < 4000, `scenario prompt is too long: ${prompt.length}`)
+  assert.match(prompt, /support edge visibly sandwiched between two clamp jaws/)
+  assert.match(prompt, /Both clamp jaws must visibly grip opposite sides of the glass edge/)
+  assert.match(prompt, /Create a three-quarter terrarium corner image/)
+  assert.match(prompt, /Reference image order: image 1: primary product truth reference/)
+  assert.doesNotMatch(prompt, /RAW LISTING TEXT SHOULD NOT DRIVE FINAL PROMPT/)
+  assert.doesNotMatch(prompt, /RAW ADDITIONAL INFO SHOULD NOT DRIVE FINAL PROMPT/)
+  assert.ok(prompt.length < 6500, `scenario prompt is too long: ${prompt.length}`)
 }
 
 await testMainImageNormalization()
