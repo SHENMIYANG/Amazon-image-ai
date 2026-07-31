@@ -49,6 +49,7 @@ Important folders:
 - Keep comments short and useful. Do not add comments that merely restate the code.
 - Prefer structured objects and arrays for tasks, request payloads, and image plans.
 - Avoid ad hoc string parsing when there is already a helper in frontend/src/utils.
+- Do not add placeholder or fake UI. If a control is visible, it must perform the real promised action. For example, only show "upload file" after real file upload is implemented; if only image upload is implemented, the UI must say image upload only.
 
 ## Runtime Shape Requirements
 

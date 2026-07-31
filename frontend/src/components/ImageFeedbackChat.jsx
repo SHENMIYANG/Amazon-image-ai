@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import './ImageFeedbackChat.css'
 
 function buildInitialRevision(image) {
@@ -27,6 +27,14 @@ function DownloadIcon() {
   )
 }
 
+function AttachmentIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  )
+}
+
 export default function ImageFeedbackChat({
   task,
   image,
@@ -36,9 +44,11 @@ export default function ImageFeedbackChat({
   onDownload,
   onClose
 }) {
+  const fileInputRef = useRef(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
 
   const messages = chatState?.messages?.length
@@ -51,6 +61,7 @@ export default function ImageFeedbackChat({
       ]
 
   const revision = chatState?.revision || buildInitialRevision(image)
+  const attachments = Array.isArray(chatState?.attachments) ? chatState.attachments : []
 
   const contextPayload = useMemo(() => ({
     productBlueprint: task?.listing?.productBlueprint || task?.listing?.productTruth || {},
@@ -76,30 +87,76 @@ export default function ImageFeedbackChat({
     },
     promptUsed: getImagePromptUsed(image),
     currentRevision: revision,
+    feedbackReferenceImages: attachments.map((item) => item.url).filter(Boolean),
     complexity: task?.listing?.complexity || 'L2'
-  }), [task, image, revision])
+  }), [task, image, revision, attachments])
 
   const updateChatState = (nextState) => {
     onChange?.({
       messages,
       revision,
+      attachments,
       ...nextState,
       updatedAt: new Date().toISOString()
     })
   }
 
-  const appendAndSave = (baseMessages, nextMessage, nextRevision = revision) => {
+  const appendAndSave = (baseMessages, nextMessage, nextRevision = revision, nextAttachments = attachments) => {
     const nextMessages = [...baseMessages, nextMessage]
     updateChatState({
       messages: nextMessages,
-      revision: nextRevision
+      revision: nextRevision,
+      attachments: nextAttachments
     })
     return nextMessages
   }
 
+  const uploadImages = async (event) => {
+    const remainingSlots = Math.max(0, 8 - attachments.length)
+    const files = Array.from(event.target.files || [])
+      .filter((file) => file.type.startsWith('image/'))
+      .slice(0, remainingSlots)
+    event.target.value = ''
+    if (!files.length || uploading || loading || generating) return
+
+    setError('')
+    setUploading(true)
+
+    try {
+      const formData = new FormData()
+      files.forEach((file) => formData.append('images', file))
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || `HTTP ${response.status}`)
+      }
+
+      const uploaded = (data.images || []).map((item) => ({
+        url: item.url,
+        filename: item.filename,
+        size: item.size,
+        mimetype: item.mimetype
+      })).filter((item) => item.url)
+
+      const nextAttachments = [...attachments, ...uploaded].slice(0, 8)
+      appendAndSave(messages, {
+        role: 'assistant',
+        content: `已添加 ${uploaded.length} 张当前图片反馈参考图。生成时会一起用于这张图的单张重生。`
+      }, revision, nextAttachments)
+    } catch (err) {
+      setError(err.message || '上传图片失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const sendMessage = async () => {
     const userMessage = input.trim()
-    if (!userMessage || loading || generating) return
+    if (!userMessage || loading || generating || uploading) return
 
     setInput('')
     setError('')
@@ -157,7 +214,10 @@ export default function ImageFeedbackChat({
         }, nextRevision)
         setGenerating(true)
 
-        const generatedImage = await onRegenerate(nextRevision)
+        const generatedImage = await onRegenerate(
+          nextRevision,
+          attachments.map((item) => item.url).filter(Boolean)
+        )
         if (!generatedImage?.imageUrl) {
           throw new Error('重新生成失败：生图接口没有返回新图片')
         }
@@ -254,17 +314,59 @@ export default function ImageFeedbackChat({
               ) : null}
             </div>
 
-            <div className="feedback-chat-panel__input">
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="告诉 AI 这张图哪里不对，或直接说“按这个生成”。"
-                rows={3}
-              />
-              <button type="button" onClick={sendMessage} disabled={loading || generating || !input.trim()}>
-                {mayBeGenerateIntent(input) ? '发送并执行' : '发送'}
-              </button>
+            <div className="feedback-chat-panel__composer">
+              {attachments.length ? (
+                <div className="feedback-chat-attachments">
+                  {attachments.map((attachment, index) => (
+                    <div key={`${attachment.url}-${index}`} className="feedback-chat-attachment">
+                      <img src={attachment.url} alt={`参考图 ${index + 1}`} />
+                      <button
+                        type="button"
+                        aria-label="移除参考图"
+                        onClick={() => updateChatState({
+                          attachments: attachments.filter((_, itemIndex) => itemIndex !== index)
+                        })}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="feedback-chat-panel__input">
+                <textarea
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="告诉 AI 这张图哪里不对，或直接说“按这个生成”。"
+                  rows={3}
+                />
+                <button type="button" onClick={sendMessage} disabled={loading || generating || uploading || !input.trim()}>
+                  {mayBeGenerateIntent(input) ? '发送并执行' : '发送'}
+                </button>
+              </div>
+
+              <div className="feedback-chat-panel__tools">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="feedback-chat-file-input"
+                  onChange={uploadImages}
+                />
+                <button
+                  type="button"
+                  className="feedback-chat-upload"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || generating || uploading || attachments.length >= 8}
+                >
+                  <AttachmentIcon />
+                  <span>{uploading ? '上传中...' : '添加图片'}</span>
+                </button>
+                <span className="feedback-chat-upload-hint">仅用于当前这张图</span>
+              </div>
             </div>
             {error ? <div className="feedback-chat-panel__error">{error}</div> : null}
           </section>

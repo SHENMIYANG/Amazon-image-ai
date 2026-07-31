@@ -675,6 +675,9 @@ function App() {
     const requestedPrompt = String(options.prompt ?? image.strategyContent ?? '').trim()
     const requestedComplexity = String(options.complexity || task?.listing?.complexity || listing.complexity || 'L2').trim()
     const referenceFiles = Array.isArray(options.referenceFiles) ? options.referenceFiles.slice(0, 1) : []
+    const providedReferenceImageUrls = Array.isArray(options.referenceImageUrls)
+      ? options.referenceImageUrls.filter(Boolean)
+      : []
     const providedExecutionRules = Array.isArray(options.executionRules) ? options.executionRules : null
     const providedPromptEn = String(options.promptEn || '').trim()
     const strategyChanged = requestedPrompt !== String(image.strategyContent || '').trim()
@@ -739,6 +742,7 @@ function App() {
       )
       const regenerationReferenceImages = [
         ...(task.referenceImages || []),
+        ...providedReferenceImageUrls,
         ...additionalReferenceImages
       ].filter((url, index, source) => url && source.indexOf(url) === index)
       const generatedImage = await requestGeneratedImage({
@@ -782,7 +786,7 @@ function App() {
                       strategy: requestedPrompt,
                       complexity: requestedComplexity,
                       baseReferenceCount: (task.referenceImages || []).length,
-                      addedReferenceCount: additionalReferenceImages.length,
+                      addedReferenceCount: additionalReferenceImages.length + providedReferenceImageUrls.length,
                       usedReferenceCount: regenerationReferenceImages.length,
                       generatedAt: new Date().toISOString()
                     },

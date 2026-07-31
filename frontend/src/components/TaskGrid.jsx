@@ -422,10 +422,11 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
           image={task.images?.[feedbackDialog.imageIndex]}
           chatState={feedbackChats[feedbackDialog.imageId]}
           onChange={(nextState) => updateFeedbackChat(feedbackDialog.imageId, nextState)}
-          onRegenerate={(revision) => onRegenerate?.(task, feedbackDialog.imageIndex, {
+          onRegenerate={(revision, feedbackReferenceImages = []) => onRegenerate?.(task, feedbackDialog.imageIndex, {
             prompt: revision.strategyContent,
             promptEn: revision.promptEn,
             executionRules: revision.executionRules,
+            referenceImageUrls: feedbackReferenceImages,
             complexity: task?.listing?.complexity || 'L2',
             suppressAlert: true,
             source: 'feedback-chat'
