@@ -9,6 +9,7 @@ import testApiKeyRoutes from './routes/testApiKey.js'
 import agentAnalyzeRoutes from './routes/agent-analyze.js'
 import promptPreviewRoutes from './routes/prompt-preview.js'
 import imageFeedbackRoutes from './routes/image-feedback.js'
+import workspaceChatRoutes from './routes/workspace-chat.js'
 import { cleanupExpiredUploads, ensureUploadsDir, UPLOADS_DIR } from './utils/uploads.js'
 
 dotenv.config()
@@ -36,6 +37,7 @@ app.use('/api/test-api-key', testApiKeyRoutes)
 app.use('/api/agent-analyze', agentAnalyzeRoutes)
 app.use('/api/prompt-preview', promptPreviewRoutes)
 app.use('/api/image-feedback', imageFeedbackRoutes)
+app.use('/api/workspace-chat', workspaceChatRoutes)
 
 // Serve uploaded images (development)
 ensureUploadsDir()

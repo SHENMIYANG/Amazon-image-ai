@@ -7,6 +7,8 @@ import ResolutionSelector from './components/ResolutionSelector'
 import SettingsModal from './components/SettingsModal'
 import SettingsButton from './components/SettingsButton'
 import AgentAnalyzer from './components/AgentAnalyzer'
+import WorkspaceChatButton from './components/WorkspaceChatButton'
+import WorkspaceChatModal from './components/WorkspaceChatModal'
 import { getMarketplaceDefaultLanguage } from './components/GenerationPreferences'
 import { parseApiJson } from './utils/apiResponse'
 import {
@@ -241,6 +243,7 @@ function App() {
   const [currentTaskId, setCurrentTaskId] = useState(null)
   const stoppingRef = useRef(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isWorkspaceChatOpen, setIsWorkspaceChatOpen] = useState(false)
   const [savingStrategyTranslations, setSavingStrategyTranslations] = useState({})
 
   useEffect(() => {
@@ -1064,7 +1067,6 @@ function App() {
   }
   const canGenerate = (listing.productName || listing.listingInfo) && productImages.length > 0
   const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
-
   return (
     <div className="app">
       <header className="header">
@@ -1073,6 +1075,7 @@ function App() {
       </header>
 
       <SettingsButton onClick={() => setIsSettingsOpen(true)} />
+      <WorkspaceChatButton onClick={() => setIsWorkspaceChatOpen(true)} />
 
       <main className="main">
         <div className="workspace-layout">
@@ -1190,11 +1193,16 @@ function App() {
             </section>
           </div>
         </div>
+
       </main>
 
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+      />
+      <WorkspaceChatModal
+        isOpen={isWorkspaceChatOpen}
+        onClose={() => setIsWorkspaceChatOpen(false)}
       />
     </div>
   )

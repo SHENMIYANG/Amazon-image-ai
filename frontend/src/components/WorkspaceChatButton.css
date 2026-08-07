@@ -1,0 +1,45 @@
+.workspace-chat-button {
+  position: fixed;
+  top: 1.2rem;
+  right: 5.9rem;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.workspace-chat-button svg {
+  width: 18px;
+  height: 18px;
+  color: #2563eb;
+}
+
+.workspace-chat-button:hover {
+  background: #f8fafc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 760px) {
+  .workspace-chat-button {
+    right: 5rem;
+    padding: 0;
+    width: 48px;
+    justify-content: center;
+  }
+
+  .workspace-chat-button span {
+    display: none;
+  }
+}

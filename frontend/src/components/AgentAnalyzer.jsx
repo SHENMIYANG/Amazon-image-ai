@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { parseApiJson } from '../utils/apiResponse'
+import { formatApiError, parseApiJson } from '../utils/apiResponse'
 import { buildAnalyzeRequest } from '../utils/requestPayload'
 import { getSelectedImageTaskCount } from '../utils/imageTasks'
 import './AgentAnalyzer.css'
@@ -142,9 +142,9 @@ export default function AgentAnalyzer({
       setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图补全详细方案。`)
     } catch (err) {
       console.error('Agent 分析失败:', err)
-      const message = String(err?.message || '').trim() || '分析失败，请检查后端返回。'
+      const message = formatApiError(err, '策略分析')
       setError(message)
-      alert(`分析失败：${message}`)
+      alert(message)
     } finally {
       setAnalyzing(false)
     }

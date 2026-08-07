@@ -84,6 +84,21 @@ async function createAgentCompletion(openai, requestOptions) {
   return await openai.chat.completions.create(requestOptions)
 }
 
+function createAgentRequestId() {
+  return `agent-${Date.now()}-${Math.round(Math.random() * 1000000)}`
+}
+
+function getErrorStatus(error) {
+  return Number(error?.status || error?.statusCode || error?.response?.status || 500)
+}
+
+function logAgentAnalyze(phase, data = {}) {
+  console.info('[agent-analyze]', {
+    phase,
+    ...data
+  })
+}
+
 function getDefaultSelectedImageTasks() {
   return [
     { type: 'main', count: 1 },
@@ -685,6 +700,20 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
 }
 
 router.post('/', async (req, res) => {
+  const requestId = createAgentRequestId()
+  const startedAt = Date.now()
+  let clientClosed = false
+
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      clientClosed = true
+      logAgentAnalyze('client_closed', {
+        requestId,
+        elapsedMs: Date.now() - startedAt
+      })
+    }
+  })
+
   try {
     const {
       productName,
@@ -707,13 +736,24 @@ router.post('/', async (req, res) => {
       primaryReferenceImageUrl = ''
     } = req.body
 
+    logAgentAnalyze('start', {
+      requestId,
+      selectedTaskCount: Array.isArray(selectedImageTasks) ? selectedImageTasks.length : 0,
+      referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0,
+      productNameChars: String(productName || '').length,
+      listingInfoChars: String(listingInfo || '').length,
+      additionalInfoChars: String(additionalInfo || '').length,
+      sellingPointsChars: String(sellingPoints || '').length
+    })
+
     const explicitPrimaryReferenceImageUrl =
       primaryReferenceImageUrl || (Array.isArray(referenceImages) ? referenceImages[0] : '')
 
     if (!productName && !listingInfo && !sellingPoints) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: 'At least one of productName, listingInfo, or sellingPoints is required'
+        message: 'At least one of productName, listingInfo, or sellingPoints is required',
+        requestId
       })
     }
 
@@ -721,14 +761,16 @@ router.post('/', async (req, res) => {
     if (requestedTasks.length === 0) {
       return res.status(400).json({
         error: 'Invalid tasks',
-        message: 'Select at least one image task'
+        message: 'Select at least one image task',
+        requestId
       })
     }
 
     if (requestedTasks.length > 12) {
       return res.status(400).json({
         error: 'Too many tasks',
-        message: 'At most 12 image tasks can be analyzed at once'
+        message: 'At most 12 image tasks can be analyzed at once',
+        requestId
       })
     }
 
@@ -762,7 +804,8 @@ router.post('/', async (req, res) => {
     if (!apiKey || apiKey === 'sk-your-api-key-here') {
       return res.status(500).json({
         error: 'Missing API Key',
-        message: 'OPENAI_API_KEY is not configured'
+        message: 'OPENAI_API_KEY is not configured',
+        requestId
       })
     }
 
@@ -773,7 +816,8 @@ router.post('/', async (req, res) => {
       maxRetries: 0
     })
 
-    console.info('[agent-analyze] upstream config', {
+    logAgentAnalyze('upstream_config', {
+      requestId,
       model,
       baseUrl,
       timeoutMs,
@@ -880,6 +924,7 @@ Step 2 task allocation must decide what each image is trying to sell or prove.
 Step 3 strategy writing must express those duties in operator-editable Chinese and controlled English execution text.
 `.trim()
 
+    const upstreamStartedAt = Date.now()
     const combinedCompletion = await createAgentCompletion(openai, {
       model,
       messages: [
@@ -894,6 +939,14 @@ Step 3 strategy writing must express those duties in operator-editable Chinese a
       response_format: { type: 'json_object' },
       temperature: 0.2,
       max_tokens: Math.min(12000, 4200 + strategyTasks.length * 1000)
+    })
+
+    logAgentAnalyze('upstream_completed', {
+      requestId,
+      upstreamElapsedMs: Date.now() - upstreamStartedAt,
+      totalElapsedMs: Date.now() - startedAt,
+      usage: combinedCompletion.usage || null,
+      clientClosed
     })
 
     const combinedResult = parseCompletionJson(combinedCompletion, 'Product understanding and image strategy')
@@ -1003,7 +1056,11 @@ Step 3 strategy writing must express those duties in operator-editable Chinese a
             promptDirty: false
           }
         } catch (translationError) {
-          console.warn('[agent-analyze] promptEn backfill failed for', plan.taskKey || plan.name, translationError.message)
+          console.warn('[agent-analyze] promptEn backfill failed', {
+            requestId,
+            task: plan.taskKey || plan.name,
+            message: translationError.message
+          })
           return plan
         }
       })
@@ -1017,9 +1074,17 @@ Step 3 strategy writing must express those duties in operator-editable Chinese a
         productUnderstandingWarnings: [],
         productUnderstandingNeedsReview: false,
         productUnderstandingRepaired: false,
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
+        requestId
       }
     }
+
+    logAgentAnalyze('success', {
+      requestId,
+      elapsedMs: Date.now() - startedAt,
+      imagePlanCount: completedPlans.length,
+      clientClosed
+    })
 
     res.json({
       success: true,
@@ -1029,10 +1094,22 @@ Step 3 strategy writing must express those duties in operator-editable Chinese a
       }
     })
   } catch (error) {
-    console.error('Agent analysis error:', error)
-    res.status(500).json({
+    const status = getErrorStatus(error)
+    console.error('[agent-analyze] failed', {
+      requestId,
+      status,
+      elapsedMs: Date.now() - startedAt,
+      clientClosed,
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    })
+
+    if (res.headersSent) return
+
+    res.status(status).json({
       error: 'Agent analysis failed',
       message: error.message,
+      requestId,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     })
   }
