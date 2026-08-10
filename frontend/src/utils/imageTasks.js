@@ -204,6 +204,7 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       type: task.taskType,
       imageRole: existing?.imageRole || '',
       sellingFocus: existing?.sellingFocus || existing?.primarySellingPoint || '',
+      currentImageProductUsage: existing?.currentImageProductUsage || existing?.imageProductUsage || {},
       blueprint: task.blueprint,
       purpose: task.description,
       executionRules: existing?.executionRules || existing?.constraints || [],

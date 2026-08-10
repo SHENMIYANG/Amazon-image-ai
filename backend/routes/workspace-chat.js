@@ -107,36 +107,6 @@ function normalizeHistory(history = []) {
     .filter((message) => message.content)
 }
 
-function buildWorkspaceContextText(context = {}) {
-  if (!context || typeof context !== 'object') return ''
-
-  const listing = context.listing || context
-  const productImages = context.productImages || {}
-  const selectedTasks = listing.selectedImageTasks || context.selectedImageTasks || {}
-  const referenceImages = context.referenceImages || listing.referenceImages || []
-
-  return clampText(
-    [
-      '【当前工作台资料】',
-      `产品名称：${listing.productName || '未填写'}`,
-      `类目：${listing.category || '未填写'}`,
-      `尺寸：${listing.dimensions || '未填写'}`,
-      `材质：${listing.material || '未填写'}`,
-      `目标受众：${listing.targetAudience || '未填写'}`,
-      `卖点：${listing.sellingPoints || '未填写'}`,
-      `补充信息：${listing.additionalInfo || '未填写'}`,
-      `图片要求/自定义设置：${listing.designNotes || '未填写'}`,
-      `站点：${listing.marketplace || '未填写'}`,
-      `图片语言：${listing.imageLanguage || '未填写'}`,
-      `复杂度：${listing.complexity || 'L2'}`,
-      `已选图片任务：${JSON.stringify(selectedTasks)}`,
-      `本地产品图片数量：${productImages.count || 0}`,
-      `已上传参考图：${Array.isArray(referenceImages) ? referenceImages.length : 0}`
-    ].join('\n'),
-    18000
-  )
-}
-
 function buildAttachmentParts(files = []) {
   const imageParts = []
   const textBlocks = []
@@ -181,17 +151,11 @@ router.post('/', parseWorkspaceChatUpload, async (req, res) => {
       })
     }
 
-    const includeWorkspaceContext =
-      req.body?.includeWorkspaceContext === true ||
-      req.body?.includeWorkspaceContext === 'true'
     const history = normalizeHistory(safeJsonParse(req.body?.history, []))
-    const workspaceContext = safeJsonParse(req.body?.workspaceContext, {})
-    const contextText = includeWorkspaceContext ? buildWorkspaceContextText(workspaceContext) : ''
     const { imageParts, textBlocks } = buildAttachmentParts(req.files || [])
 
     const userText = clampText(
       [
-        contextText,
         textBlocks.join('\n\n'),
         `【用户问题】\n${message}`
       ].filter(Boolean).join('\n\n'),

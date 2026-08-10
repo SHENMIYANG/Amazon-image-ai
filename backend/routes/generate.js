@@ -861,7 +861,6 @@ function summarizeVisualEvidence(productBlueprint = {}) {
   return normalizeStringArray(
     [
       ...(productBlueprint.structure?.importantRelationships || []),
-      ...(productBlueprint.productRules?.mustKeep || []),
       ...(productBlueprint.usage?.supportObject || []),
       ...(productBlueprint.usage?.contactPoint || []),
       ...(productBlueprint.usage?.spatialRelationship || []),
@@ -873,6 +872,25 @@ function summarizeVisualEvidence(productBlueprint = {}) {
     ],
     14
   )
+}
+
+function summarizeCurrentImageProductUsage(imagePlan = {}) {
+  const usage = imagePlan.currentImageProductUsage || imagePlan.imageProductUsage
+  if (!usage || typeof usage !== 'object') return []
+
+  const lines = []
+  const add = (label, values) => {
+    const items = Array.isArray(values) ? values.filter(Boolean) : [values].filter(Boolean)
+    if (items.length > 0) lines.push(`${label}: ${items.join(', ')}`)
+  }
+
+  add('display mode', usage.displayMode)
+  add('required items for this image', usage.requiredItems)
+  add('optional items for this image', usage.optionalItems)
+  add('do not show as included', usage.doNotShowAsIncluded)
+  add('reason', usage.reason)
+
+  return lines
 }
 
 function summarizeProductExclusions(productBlueprint = {}) {
@@ -986,7 +1004,7 @@ function crc32(buffer) {
 
 function summarizeCopyLines(imagePlan = {}) {
   return Array.isArray(imagePlan?.copy)
-    ? imagePlan.copy.map((item) => cleanPromptText(item)).filter(Boolean).slice(0, 2)
+    ? imagePlan.copy.map((item) => cleanPromptText(item)).filter(Boolean).slice(0, 8)
     : []
 }
 
@@ -1015,6 +1033,7 @@ function buildPromptWithLimit(coreSections = [], optionalSections = [], suffix =
 export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const sourcePrompt = plan?.strategyContent || ''
   const sourceExecutionRules = normalizeStringArray(plan?.executionRules || plan?.constraints, 12).join('\n')
+  const sourceProductUsage = summarizeCurrentImageProductUsage(plan).join('\n')
   const promptEn = plan?.promptEn || ''
 
   if (promptEn && !plan.promptDirty) {
@@ -1045,7 +1064,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const targetLanguage = getTargetImageLanguage(listing)
   const cacheKey = crypto
     .createHash('sha256')
-    .update([model, targetLanguage, sourcePrompt, sourceExecutionRules].join('\n'))
+    .update([model, targetLanguage, sourcePrompt, sourceProductUsage, sourceExecutionRules].join('\n'))
     .digest('hex')
   const cachedTranslation = strategyTranslationCache.get(cacheKey)
   if (cachedTranslation) {
@@ -1070,6 +1089,9 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   if (sourceExecutionRules) {
     userMessageSections.push('- Hard execution rules that must remain exact:', sourceExecutionRules)
   }
+  if (sourceProductUsage) {
+    userMessageSections.push('- Current image product usage that must remain exact:', sourceProductUsage)
+  }
   userMessageSections.push(
     '',
     'Canonical Chinese strategy:',
@@ -1077,6 +1099,9 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   )
   if (sourceExecutionRules) {
     userMessageSections.push('', 'Canonical Chinese execution rules:', sourceExecutionRules)
+  }
+  if (sourceProductUsage) {
+    userMessageSections.push('', 'Current image product usage:', sourceProductUsage)
   }
 
   const userMessage = userMessageSections.join('\n')
@@ -1158,6 +1183,7 @@ export function buildAmazonPrompt(
   const truthFacts = summarizeProductTruth(productBlueprint)
   const usageContract = summarizeUsageContract(productBlueprint)
   const visibleEvidence = summarizeVisualEvidence(productBlueprint)
+  const imageProductUsage = summarizeCurrentImageProductUsage(imagePlan)
   const negativeFacts = summarizeProductExclusions(productBlueprint)
   const executionRules = normalizeStringArray(imagePlan?.executionRules || imagePlan?.constraints, 10)
   const complexityLine = {
@@ -1171,6 +1197,7 @@ export function buildAmazonPrompt(
     'Generate the image from scratch but keep the same real product. Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, duplicate, or omit product parts.',
     truthFacts.length > 0 ? 'Confirmed product truth: ' + truthFacts.join(' | ') + '.' : '',
     usageContract.length > 0 ? 'Confirmed real-use contract: ' + usageContract.join(' | ') + '.' : '',
+    imageProductUsage.length > 0 ? 'Current image product usage: ' + imageProductUsage.join(' | ') + '.' : '',
     visibleEvidence.length > 0 ? 'Visible proof that must appear: ' + visibleEvidence.join(' | ') + '.' : '',
     negativeFacts.length > 0 ? 'Hard visual exclusions: ' + negativeFacts.join(' | ') + '.' : '',
     executionRules.length > 0 ? 'Execution protection rules: ' + executionRules.join(' | ') + '.' : '',

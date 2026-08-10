@@ -17,9 +17,13 @@ export function getMarketplaceLanguage(marketplace = 'UK') {
   return languageMap[marketplace] || 'English'
 }
 
-export function normalizeStringArray(value, max = 8) {
+export function normalizeStringArray(value, max = 8, maxItemLength = 0) {
   return Array.isArray(value)
-    ? value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, max)
+    ? value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .map((item) => (maxItemLength > 0 ? item.slice(0, maxItemLength) : item))
+        .slice(0, max)
     : []
 }
 

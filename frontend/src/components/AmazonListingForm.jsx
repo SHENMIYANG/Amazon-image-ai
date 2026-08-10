@@ -380,7 +380,7 @@ export default function AmazonListingForm({
                         <div className="image-plan-execution-block">
                           <div className="image-plan-execution-block__header">
                             <span className="image-plan-execution-block__tag">执行保护</span>
-                            <small>给生图模型看的硬约束，按行填写</small>
+                            <small>硬性要求和禁止项</small>
                           </div>
                           <textarea
                             className="image-plan-execution-textarea"

@@ -40,7 +40,7 @@ function SendIcon() {
 function buildInitialMessage() {
   return {
     role: 'assistant',
-    content: '你可以在这里分析产品、卖点、受众、参考图和图片表达方向。默认会带入当前工作台资料，你也可以上传图片或文本文件一起分析。'
+    content: '你可以在这里分析产品、卖点、受众、参考图和图片表达方向。'
   }
 }
 
@@ -162,7 +162,6 @@ export default function WorkspaceChat({
       const formData = new FormData()
       formData.append('message', userMessage.content)
       formData.append('history', JSON.stringify(activeMessages.filter((message) => message.role !== 'system')))
-      formData.append('includeWorkspaceContext', 'false')
       sentAttachments.forEach((attachment) => formData.append('attachments', attachment.file))
 
       const response = await fetch('/api/workspace-chat', {
