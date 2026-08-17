@@ -1,11 +1,12 @@
 import express from 'express'
 import { buildAmazonPrompt, translatePlanPromptIfNeeded } from './generate.js'
+import { persistImagePlanVersion } from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
 
 router.post('/', async (req, res) => {
   try {
-    const { listing, plan, resolution } = req.body || {}
+    const { listing, plan, resolution, persistence } = req.body || {}
     const strategyContent = String(plan?.strategyContent || '').trim()
 
     if (!listing || !strategyContent) {
@@ -31,13 +32,19 @@ router.post('/', async (req, res) => {
       resolution || '2048x2048',
       listing.primaryReferenceImageUrl || ''
     )
+    const persistedVersion = await persistImagePlanVersion({
+      workspaceId: persistence?.workspaceId,
+      imagePlanId: persistence?.imagePlanId || plan?.databasePlanId,
+      plan: normalizedPlan
+    })
 
     res.json({
       success: true,
       data: {
         promptZh: normalizedPlan.originalPrompt || strategyContent,
         promptEn,
-        executionPromptEn
+        executionPromptEn,
+        persistence: persistedVersion
       }
     })
   } catch (error) {

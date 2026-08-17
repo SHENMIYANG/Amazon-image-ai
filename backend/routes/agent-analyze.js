@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import OpenAI from 'openai'
 import { getMarketplaceLanguage } from '../utils/productModel.js'
-import { translatePlanPromptIfNeeded } from './generate.js'
 import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../utils/uploads.js'
 import {
   buildProductSignals as buildAgentProductSignals,
@@ -15,6 +14,7 @@ import {
   extractSellingPointList as extractAgentSellingPointList,
   getComplexityDefinition as getAgentComplexityDefinition
 } from '../services/agent/strategyPrompt.js'
+import { persistStrategyResult } from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
 
@@ -76,6 +76,32 @@ function createAgentRequestId() {
 
 function getErrorStatus(error) {
   return Number(error?.status || error?.statusCode || error?.response?.status || 500)
+}
+
+function createAgentAnalyzeError({ stage, status, message, cause } = {}) {
+  const error = new Error(message || '策略分析失败')
+  error.stage = stage || 'unknown'
+  error.status = status || 500
+  error.cause = cause
+  return error
+}
+
+function getUpstreamFailure(error) {
+  const upstreamStatus = getErrorStatus(error)
+  const isTimeout = error?.name === 'APIConnectionTimeoutError' || /timeout|timed out/i.test(String(error?.message || ''))
+  const status = isTimeout ? 504 : (upstreamStatus >= 500 ? 502 : upstreamStatus)
+  const upstreamRequestId = String(error?.request_id || error?.requestId || '').trim()
+  const detail = String(error?.message || '').trim()
+  const suffix = upstreamRequestId ? `（上游请求 ID：${upstreamRequestId}）` : ''
+
+  return createAgentAnalyzeError({
+    stage: 'model_request',
+    status: status >= 400 && status < 600 ? status : 502,
+    message: isTimeout
+      ? `策略模型等待超时${suffix}。本次没有自动重试，请确认上游服务后手动重试。`
+      : `策略模型服务请求失败${suffix}${detail ? `：${detail}` : ''}`,
+    cause: error
+  })
 }
 
 function logAgentAnalyze(phase, data = {}) {
@@ -183,9 +209,35 @@ function normalizeContextSegment(value = '') {
   return cleanContextSegment(value).toLowerCase()
 }
 
-async function buildImageContentParts(primaryReferenceImageUrl = '', referenceImages = []) {
+export function getDistinctSellingPoints(sellingPoints = '', listingInfo = '') {
+  const points = String(sellingPoints || '').trim()
+  const listing = String(listingInfo || '').trim()
+  if (!points || !listing) return points
+
+  return normalizeContextSegment(listing).includes(normalizeContextSegment(points))
+    ? ''
+    : points
+}
+
+function getReferenceRoleLabel(role = '') {
+  const labels = {
+    primary_product: 'the explicit primary product image and the highest authority for product truth',
+    supporting_product: 'a supporting product image that may supplement angle, contents, usage, or structure without overriding primary product truth',
+    layout_style_reference: 'a layout or style reference that may guide composition, visual hierarchy, or atmosphere only and must not change product truth',
+    regeneration_reference: 'a user-added correction reference for this regeneration only; it may guide the requested correction without changing primary product truth'
+  }
+
+  return labels[role] || labels.supporting_product
+}
+
+async function buildImageContentParts(primaryReferenceImageUrl = '', referenceImages = [], referenceImageRoles = []) {
   const contentParts = []
   const normalizedReferenceImages = Array.isArray(referenceImages) ? referenceImages.filter(Boolean) : []
+  const roleByUrl = new Map(
+    (Array.isArray(referenceImageRoles) ? referenceImageRoles : [])
+      .filter((item) => item?.url)
+      .map((item) => [item.url, item.role])
+  )
   const orderedReferenceImages = []
 
   if (primaryReferenceImageUrl && normalizedReferenceImages.includes(primaryReferenceImageUrl)) {
@@ -202,12 +254,12 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
     const imagePath = resolveUploadPathFromUrl(imageUrl)
     if (!imagePath || !fs.existsSync(imagePath)) continue
 
+    const role = imageUrl === primaryReferenceImageUrl
+      ? 'primary_product'
+      : roleByUrl.get(imageUrl) || 'supporting_product'
     contentParts.push({
       type: 'text',
-      text:
-        index === 0 && primaryReferenceImageUrl
-          ? 'Reference image 1 is the explicit primary product image and the highest authority for product truth.'
-          : `Reference image ${index + 1} is a supporting product image and may only supplement understanding.`
+      text: `Reference image ${index + 1} is ${getReferenceRoleLabel(role)}.`
     })
 
     const ext = path.extname(imagePath).toLowerCase()
@@ -246,6 +298,17 @@ function parseCompletionJson(completion, label) {
   return JSON.parse(rawContent)
 }
 
+export function getIncompleteStrategyPlanIds(plans = []) {
+  return (Array.isArray(plans) ? plans : [])
+    .filter((plan) =>
+      plan.taskType !== 'main' && (
+        !String(plan.strategyContent || '').trim() ||
+        !String(plan.promptEn || '').trim()
+      )
+    )
+    .map((plan) => plan.id)
+}
+
 router.post('/', async (req, res) => {
   const requestId = createAgentRequestId()
   const startedAt = Date.now()
@@ -280,7 +343,11 @@ router.post('/', async (req, res) => {
       sellingPoints,
       selectedImageTasks = [],
       referenceImages = [],
-      primaryReferenceImageUrl = ''
+      primaryReferenceImageUrl = '',
+      referenceImageRoles = [],
+      workspaceId = '',
+      sourceSystem = '',
+      externalProductId = ''
     } = req.body
 
     logAgentAnalyze('start', {
@@ -321,6 +388,7 @@ router.post('/', async (req, res) => {
       })
     }
 
+    const distinctSellingPoints = getDistinctSellingPoints(sellingPoints, listingInfo)
     const fullContext = buildDedupedContext([
       listingInfo,
       additionalInfo,
@@ -329,7 +397,7 @@ router.post('/', async (req, res) => {
       category,
       dimensions,
       material,
-      sellingPoints
+      distinctSellingPoints
     ])
 
     const productSignals = buildAgentProductSignals(fullContext)
@@ -341,7 +409,21 @@ router.post('/', async (req, res) => {
     const brandColorLabel = getBrandColorLabel(brandColorMode, brandColor)
     const complexityDefinition = getAgentComplexityDefinition(complexity)
 
-    const imageContentParts = await buildImageContentParts(explicitPrimaryReferenceImageUrl, referenceImages)
+    let imageContentParts
+    try {
+      imageContentParts = await buildImageContentParts(
+        explicitPrimaryReferenceImageUrl,
+        referenceImages,
+        referenceImageRoles
+      )
+    } catch (error) {
+      throw createAgentAnalyzeError({
+        stage: 'reference_images',
+        status: 409,
+        message: `参考图片尚未准备好或读取失败：${error.message}`,
+        cause: error
+      })
+    }
     const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl =
       process.env.AGENT_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
@@ -373,7 +455,7 @@ router.post('/', async (req, res) => {
     })
 
     const strategyTasks = requestedTasks.filter((task) => task.taskType !== 'main')
-    const sellingPointList = extractAgentSellingPointList(sellingPoints || listingInfo)
+    const sellingPointList = extractAgentSellingPointList(distinctSellingPoints || listingInfo)
     const {
       systemPrompt: combinedSystemPrompt,
       userPrompt: combinedUserPrompt
@@ -386,7 +468,7 @@ router.post('/', async (req, res) => {
       dimensions,
       material,
       targetAudience,
-      sellingPoints,
+      sellingPoints: distinctSellingPoints,
       sellingPointList,
       listingInfo,
       additionalInfo,
@@ -399,21 +481,26 @@ router.post('/', async (req, res) => {
     })
 
     const upstreamStartedAt = Date.now()
-    const combinedCompletion = await createAgentCompletion(openai, {
-      model,
-      messages: [
-        { role: 'system', content: combinedSystemPrompt },
-        {
-          role: 'user',
-          content: imageContentParts.length > 0
-            ? [{ type: 'text', text: combinedUserPrompt }, ...imageContentParts]
-            : combinedUserPrompt
-        }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-      max_tokens: Math.min(12000, 4200 + strategyTasks.length * 1000)
-    })
+    let combinedCompletion
+    try {
+      combinedCompletion = await createAgentCompletion(openai, {
+        model,
+        messages: [
+          { role: 'system', content: combinedSystemPrompt },
+          {
+            role: 'user',
+            content: imageContentParts.length > 0
+              ? [{ type: 'text', text: combinedUserPrompt }, ...imageContentParts]
+              : combinedUserPrompt
+          }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        max_tokens: Math.min(12000, 4200 + strategyTasks.length * 1000)
+      })
+    } catch (error) {
+      throw getUpstreamFailure(error)
+    }
 
     logAgentAnalyze('upstream_completed', {
       requestId,
@@ -423,11 +510,23 @@ router.post('/', async (req, res) => {
       clientClosed
     })
 
-    const combinedResult = parseCompletionJson(combinedCompletion, 'Product understanding and image strategy')
+    let combinedResult
+    try {
+      combinedResult = parseCompletionJson(combinedCompletion, 'Product understanding and image strategy')
+    } catch (error) {
+      throw createAgentAnalyzeError({
+        stage: 'model_response',
+        status: 502,
+        message: `策略模型返回的数据不是完整 JSON：${error.message}`,
+        cause: error
+      })
+    }
     const productBlueprint = normalizeAgentProductBlueprint(combinedResult.productBlueprint, {
       productName,
+      listingInfo,
       category,
       marketplace,
+      dimensions,
       material,
       sellingPoints,
       additionalInfo,
@@ -459,59 +558,25 @@ router.post('/', async (req, res) => {
       productBlueprint
     })
 
-    const translationListing = {
-      productName,
-      listingInfo,
-      category,
-      marketplace: marketplace || 'UK',
-      imageLanguage: marketplaceLanguage,
-      dimensions,
-      material,
-      targetAudience,
-      additionalInfo,
-      designNotes,
-      fontPreference,
-      brandColorMode,
-      brandColor,
-      sellingPoints,
-      productBlueprint
-    }
+    const incompletePlanIds = getIncompleteStrategyPlanIds(normalizedPlans)
 
-    const completedPlans = await Promise.all(
-      normalizedPlans.map(async (plan) => {
-        if (plan.taskType === 'main') return plan
-        if (String(plan.promptEn || '').trim()) return plan
-        if (!String(plan.strategyContent || '').trim()) return plan
-
-        try {
-          const translatedPlan = await translatePlanPromptIfNeeded(
-            {
-              ...plan,
-              promptDirty: true
-            },
-            translationListing,
-            '2048x2048'
-          )
-
-          return {
-            ...plan,
-            promptEn: String(translatedPlan.promptEn || '').trim(),
-            promptDirty: false
-          }
-        } catch (translationError) {
-          console.warn('[agent-analyze] promptEn backfill failed', {
-            requestId,
-            task: plan.taskKey || plan.name,
-            message: translationError.message
-          })
-          return plan
-        }
+    if (incompletePlanIds.length > 0) {
+      const incompleteTaskIds = incompletePlanIds.join('、')
+      logAgentAnalyze('incomplete_strategy_response', {
+        requestId,
+        incompleteTaskIds,
+        elapsedMs: Date.now() - startedAt
       })
-    )
+      return res.status(502).json({
+        error: 'Incomplete strategy response',
+        message: `策略模型没有完整返回图${incompleteTaskIds}的中文策略和英文执行稿。本次不会额外调用翻译接口，请重新生成策略。`,
+        requestId
+      })
+    }
 
     const responseData = {
       productBlueprint,
-      imagePlans: completedPlans,
+      imagePlans: normalizedPlans,
       _meta: {
         requestedImageCount: requestedTasks.length,
         productUnderstandingWarnings: [],
@@ -522,10 +587,40 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const persistence = await persistStrategyResult({
+      input: {
+        ...req.body,
+        workspaceId,
+        sourceSystem,
+        externalProductId
+      },
+      output: responseData,
+      requestId,
+      model,
+      durationMs: Date.now() - startedAt
+    })
+
+    if (persistence) {
+      const planIdsByTaskKey = new Map(
+        persistence.imagePlans.map((plan) => [plan.taskKey, plan])
+      )
+      responseData.imagePlans = responseData.imagePlans.map((plan) => ({
+        ...plan,
+        databasePlanId: planIdsByTaskKey.get(plan.taskKey)?.imagePlanId,
+        databasePlanVersionId: planIdsByTaskKey.get(plan.taskKey)?.imagePlanVersionId
+      }))
+      responseData._meta.persistence = {
+        workspaceId: persistence.workspaceId,
+        inputVersionId: persistence.inputVersionId,
+        strategyRunId: persistence.strategyRunId,
+        referenceAssetIds: persistence.referenceAssetIds
+      }
+    }
+
     logAgentAnalyze('success', {
       requestId,
       elapsedMs: Date.now() - startedAt,
-      imagePlanCount: completedPlans.length,
+      imagePlanCount: normalizedPlans.length,
       clientClosed
     })
 
@@ -541,6 +636,7 @@ router.post('/', async (req, res) => {
     console.error('[agent-analyze] failed', {
       requestId,
       status,
+      stage: error.stage || 'unknown',
       elapsedMs: Date.now() - startedAt,
       clientClosed,
       message: error.message,
@@ -553,6 +649,7 @@ router.post('/', async (req, res) => {
       error: 'Agent analysis failed',
       message: error.message,
       requestId,
+      stage: error.stage || 'unknown',
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     })
   }

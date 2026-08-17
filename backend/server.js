@@ -73,7 +73,8 @@ if (NODE_ENV === 'production') {
 // Error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err.message)
-  res.status(500).json({ 
+  const status = Number(err?.status || err?.statusCode || 500)
+  res.status(status >= 400 && status < 600 ? status : 500).json({
     error: 'Server error', 
     message: err.message 
   })

@@ -1,4 +1,4 @@
-import { getSelectedImageTasks } from './imageTasks'
+import { getSelectedImageTasks, normalizeImagePlan } from './imageTasks'
 
 const TITLE_LABELS = ['title', 'product name', 'productname', '产品名称', '标题']
 
@@ -118,6 +118,8 @@ export function parseListingInfoSections(listingInfo = '') {
 export function buildListingPayload(source = {}, { includeGenerationSettings = false, stripAnalysisArtifacts = false } = {}) {
   const parsedSections = parseListingInfoSections(source.listingInfo || source.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(source.selectedImageTasks)
+  // The combined listing is the canonical source. Do not repeat it as selling points.
+  const sellingPoints = source.sellingPoints || parsedSections.sellingPoints || ''
 
   const payload = {
     productName:
@@ -127,7 +129,7 @@ export function buildListingPayload(source = {}, { includeGenerationSettings = f
     listingInfo: source.listingInfo,
     marketplace: source.marketplace || 'UK',
     imageLanguage: source.imageLanguage,
-    sellingPoints: source.sellingPoints || parsedSections.sellingPoints || source.listingInfo,
+    sellingPoints,
     additionalInfo: source.additionalInfo,
     fontPreference: source.fontPreference,
     brandColorMode: source.brandColorMode,
@@ -170,19 +172,22 @@ function buildExecutionProductContext(source = {}) {
 }
 
 function buildExecutionStrategyContext(plan = {}) {
+  const normalizedPlan = normalizeImagePlan(plan)
   return compactObject({
-    id: plan.id,
-    name: plan.name,
-    taskType: plan.taskType || plan.type,
-    imageRole: plan.imageRole,
-    sellingFocus: plan.sellingFocus || plan.primarySellingPoint,
-    currentImageProductUsage: plan.currentImageProductUsage || plan.imageProductUsage,
-    strategyContent: plan.strategyContent,
-    promptEn: plan.promptEn,
-    promptDirty: plan.promptDirty ? true : undefined,
-    executionRules: plan.executionRules || plan.constraints,
-    copy: plan.copy,
-    regenerationMode: plan.regenerationMode ? true : undefined
+    id: normalizedPlan.id,
+    name: normalizedPlan.name,
+    taskType: normalizedPlan.taskType,
+    imageRole: normalizedPlan.imageRole,
+    sellingFocus: normalizedPlan.sellingFocus,
+    currentImageProductUsage: normalizedPlan.currentImageProductUsage,
+    strategyContent: normalizedPlan.strategyContent,
+    promptEn: normalizedPlan.promptEn,
+    promptDirty: normalizedPlan.promptDirty ? true : undefined,
+    executionRules: normalizedPlan.executionRules,
+    copy: normalizedPlan.copy,
+    databasePlanId: normalizedPlan.databasePlanId,
+    databasePlanVersionId: normalizedPlan.databasePlanVersionId,
+    regenerationMode: normalizedPlan.regenerationMode ? true : undefined
   })
 }
 
@@ -202,6 +207,7 @@ function buildReferenceImageRoles(referenceImages = [], primaryReferenceImageUrl
 export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryReferenceImageUrl = '') {
   const parsedSections = parseListingInfoSections(listing.listingInfo || listing.sellingPoints)
   const selectedImageTasks = getSelectedImageTasks(listing.selectedImageTasks)
+  const sellingPoints = listing.sellingPoints || parsedSections.sellingPoints || ''
   const referenceImageRoles = referenceImages.map((url) => ({
     url,
     role: url === primaryReferenceImageUrl ? 'primary_product' : 'supporting_product'
@@ -215,7 +221,7 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     listingInfo: listing.listingInfo,
     marketplace: listing.marketplace || 'UK',
     imageLanguage: listing.imageLanguage,
-    sellingPoints: listing.sellingPoints || parsedSections.sellingPoints || listing.listingInfo,
+    sellingPoints,
     additionalInfo: listing.additionalInfo,
     fontPreference: listing.fontPreference,
     brandColorMode: listing.brandColorMode,
@@ -229,26 +235,32 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     selectedImageTasks,
     referenceImages,
     primaryReferenceImageUrl,
-    referenceImageRoles
+    referenceImageRoles,
+    workspaceId: listing._meta?.persistence?.workspaceId,
+    sourceSystem: listing.sourceSystem,
+    externalProductId: listing.externalProductId
   })
 }
 
 export function buildPlanPayload(plan = {}) {
+  const normalizedPlan = normalizeImagePlan(plan)
   return compactObject({
-    id: plan.id,
-    name: plan.name,
-    type: plan.type,
-    taskType: plan.taskType,
-    taskKey: plan.taskKey,
-    imageRole: plan.imageRole,
-    sellingFocus: plan.sellingFocus || plan.primarySellingPoint,
-    currentImageProductUsage: plan.currentImageProductUsage || plan.imageProductUsage,
-    strategyContent: plan.strategyContent,
-    promptEn: plan.promptEn,
-    promptDirty: plan.promptDirty ? true : undefined,
-    executionRules: plan.executionRules || plan.constraints,
-    copy: plan.copy,
-    regenerationMode: plan.regenerationMode ? true : undefined
+    id: normalizedPlan.id,
+    name: normalizedPlan.name,
+    type: normalizedPlan.type,
+    taskType: normalizedPlan.taskType,
+    taskKey: normalizedPlan.taskKey,
+    imageRole: normalizedPlan.imageRole,
+    sellingFocus: normalizedPlan.sellingFocus,
+    currentImageProductUsage: normalizedPlan.currentImageProductUsage,
+    strategyContent: normalizedPlan.strategyContent,
+    promptEn: normalizedPlan.promptEn,
+    promptDirty: normalizedPlan.promptDirty ? true : undefined,
+    executionRules: normalizedPlan.executionRules,
+    copy: normalizedPlan.copy,
+    databasePlanId: normalizedPlan.databasePlanId,
+    databasePlanVersionId: normalizedPlan.databasePlanVersionId,
+    regenerationMode: normalizedPlan.regenerationMode ? true : undefined
   })
 }
 
@@ -268,20 +280,6 @@ export function buildGenerateRequest(
   )
 
   return compactObject({
-    listing: compactObject({
-      productName: sourceListing.productName,
-      marketplace: sourceListing.marketplace || 'UK',
-      imageLanguage: sourceListing.imageLanguage,
-      category: sourceListing.category,
-      productBlueprint: sourceListing.productBlueprint
-    }),
-    imagePlans: [buildPlanPayload(plan)],
-    complexity,
-    resolution,
-    referenceImages,
-    primaryReferenceImageUrl,
-    referenceImageRoles,
-    productBlueprint: sourceListing.productBlueprint,
     executionContext: {
       product: buildExecutionProductContext(sourceListing),
       strategy: buildExecutionStrategyContext(plan),
@@ -293,6 +291,12 @@ export function buildGenerateRequest(
       output: compactObject({
         resolution,
         complexity
+      }),
+      persistence: compactObject({
+        workspaceId: sourceListing._meta?.persistence?.workspaceId,
+        imagePlanId: normalizeImagePlan(plan).databasePlanId,
+        imagePlanVersionId: normalizeImagePlan(plan).databasePlanVersionId,
+        referenceAssetIds: sourceListing._meta?.persistence?.referenceAssetIds
       })
     }
   })

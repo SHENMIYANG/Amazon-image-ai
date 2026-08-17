@@ -99,17 +99,21 @@ export default function AmazonListingForm({
   useEffect(() => {
     if (!showStrategySection) return
 
+    // A completed analysis already returns the canonical task order. Rebuilding
+    // it here can replace cards while the operator is reviewing the strategy.
+    if (listing._meta?.generatedAt) return
+
     const nextPlans = buildDefaultPlansFromTasks(normalizedTaskConfig, imagePlans)
     if (plansSignature(imagePlans) !== plansSignature(nextPlans)) {
       onChange('imagePlans', nextPlans)
     }
   }, [showStrategySection, normalizedTaskConfig, imagePlans, onChange])
 
-  const handleImagePlanChange = (imageId, prompt) => {
+  const handleImagePlanChange = (taskKey, prompt) => {
     onChange(
       'imagePlans',
       imagePlans.map((plan) =>
-        plan.id === imageId
+        plan.taskKey === taskKey
           ? {
               ...plan,
               strategyContent: prompt,
@@ -122,7 +126,7 @@ export default function AmazonListingForm({
     )
   }
 
-  const handleExecutionRulesChange = (imageId, value) => {
+  const handleExecutionRulesChange = (taskKey, value) => {
     const executionRules = String(value || '')
       .split('\n')
       .map((line) => line.trim())
@@ -131,7 +135,7 @@ export default function AmazonListingForm({
     onChange(
       'imagePlans',
       imagePlans.map((plan) =>
-        plan.id === imageId
+        plan.taskKey === taskKey
           ? {
               ...plan,
               executionRules,
@@ -340,7 +344,7 @@ export default function AmazonListingForm({
             ) : (
               <div className="image-plans-grid image-plans-grid--full">
                 {imagePlans.map((plan) => {
-                  const isSaving = Boolean(savingStrategyTranslations?.[plan.id])
+                  const isSaving = Boolean(savingStrategyTranslations?.[plan.taskKey])
                   const hasStrategy = Boolean(String(plan.strategyContent || '').trim())
                   const englishStatus =
                     plan.taskType === 'main'
@@ -353,7 +357,7 @@ export default function AmazonListingForm({
 
                   return (
                     <div
-                      key={plan.id}
+                      key={plan.taskKey || `image-plan-${plan.id}`}
                       className={`form-group image-plan-group ${plan.taskType === 'main' ? 'image-plan-group--hero' : ''}`}
                     >
                       <div className="image-plan-label">
@@ -372,7 +376,7 @@ export default function AmazonListingForm({
                       <textarea
                         value={plan.strategyContent || ''}
                         placeholder={plan.placeholder || ''}
-                        onChange={(event) => handleImagePlanChange(plan.id, event.target.value)}
+                        onChange={(event) => handleImagePlanChange(plan.taskKey, event.target.value)}
                         rows={plan.taskType === 'main' ? 6 : 8}
                       />
 
@@ -386,7 +390,7 @@ export default function AmazonListingForm({
                             className="image-plan-execution-textarea"
                             value={(plan.executionRules || []).join('\n')}
                             placeholder={getExecutionRulesPlaceholder()}
-                            onChange={(event) => handleExecutionRulesChange(plan.id, event.target.value)}
+                            onChange={(event) => handleExecutionRulesChange(plan.taskKey, event.target.value)}
                             rows={3}
                           />
                         </div>
@@ -397,7 +401,7 @@ export default function AmazonListingForm({
                           <button
                             type="button"
                             className="editor-modal-btn editor-modal-btn--ghost image-plan-save-btn"
-                            onClick={() => onSaveStrategyTranslation?.(plan.id)}
+                            onClick={() => onSaveStrategyTranslation?.(plan.taskKey, plan)}
                             disabled={!hasStrategy || isSaving}
                           >
                             {isSaving ? '保存中...' : '保存本图英文执行稿'}

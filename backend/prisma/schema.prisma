@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  ADMIN
+  OPERATOR
+  DESIGNER
+  VIEWER
+}
+
+enum AssetRole {
+  PRODUCT_REFERENCE
+  GENERATED_IMAGE
+  FEEDBACK_REFERENCE
+  CHAT_ATTACHMENT
+}
+
+enum ReferenceRole {
+  PRIMARY_PRODUCT
+  SUPPORTING_PRODUCT
+  LAYOUT_STYLE_REFERENCE
+  REGENERATION_REFERENCE
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ModelRequestType {
+  STRATEGY
+  STRATEGY_TRANSLATION
+  IMAGE_GENERATION
+  IMAGE_FEEDBACK
+  WORKSPACE_CHAT
+}
+
+model Organization {
+  id                 String             @id @default(uuid()) @db.Uuid
+  name               String
+  slug               String             @unique
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  memberships        Membership[]
+  workspaces         ProductWorkspace[]
+  assets             Asset[]
+  modelRequests      ModelRequest[]
+  auditEvents        AuditEvent[]
+}
+
+model User {
+  id                 String             @id @default(uuid()) @db.Uuid
+  email              String             @unique
+  displayName        String?
+  passwordHash       String?
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  memberships        Membership[]
+  createdWorkspaces  ProductWorkspace[] @relation("WorkspaceCreator")
+  createdInputs      ProductInputVersion[] @relation("InputCreator")
+  createdPlans       ImagePlanVersion[] @relation("PlanVersionCreator")
+  createdRuns        GenerationRun[]    @relation("GenerationCreator")
+  createdAssets      Asset[]            @relation("AssetCreator")
+  feedbackMessages   FeedbackMessage[]  @relation("FeedbackAuthor")
+  modelRequests      ModelRequest[]     @relation("ModelRequestActor")
+  auditEvents        AuditEvent[]       @relation("AuditActor")
+}
+
+model Membership {
+  id                 String         @id @default(uuid()) @db.Uuid
+  organizationId     String         @db.Uuid
+  userId             String         @db.Uuid
+  role               MembershipRole @default(OPERATOR)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model ProductWorkspace {
+  id                 String                @id @default(uuid()) @db.Uuid
+  organizationId     String                @db.Uuid
+  sourceSystem       String?
+  externalProductId  String?
+  title              String?
+  status             String                @default("ACTIVE")
+  createdById        String?               @db.Uuid
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  deletedAt          DateTime?
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy          User?                 @relation("WorkspaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  inputVersions      ProductInputVersion[]
+  references         WorkspaceReference[]
+  strategyRuns       StrategyRun[]
+  generationRuns     GenerationRun[]
+  assets             Asset[]
+  feedbackThreads    FeedbackThread[]
+  modelRequests      ModelRequest[]
+  auditEvents        AuditEvent[]
+
+  @@unique([organizationId, sourceSystem, externalProductId])
+  @@index([organizationId, updatedAt])
+}
+
+model ProductInputVersion {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @db.Uuid
+  version            Int
+  inputSnapshot      Json
+  productBlueprint   Json?
+  createdById        String?            @db.Uuid
+  createdAt          DateTime           @default(now())
+  workspace          ProductWorkspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy          User?              @relation("InputCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  strategyRuns       StrategyRun[]
+  references         WorkspaceReference[]
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId, createdAt])
+}
+
+model Asset {
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @db.Uuid
+  workspaceId        String?            @db.Uuid
+  storageProvider    String
+  objectKey          String
+  publicUrl          String?
+  mimeType           String?
+  byteSize           Int?
+  width              Int?
+  height             Int?
+  sha256             String?
+  role               AssetRole
+  createdById        String?            @db.Uuid
+  createdAt          DateTime           @default(now())
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace          ProductWorkspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  createdBy          User?              @relation("AssetCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  references         WorkspaceReference[]
+  generatedImages    GeneratedImage[]
+  feedbackAttachments FeedbackAttachment[]
+
+  @@unique([storageProvider, objectKey])
+  @@index([organizationId, workspaceId, role])
+  @@index([sha256])
+}
+
+model WorkspaceReference {
+  id                 String            @id @default(uuid()) @db.Uuid
+  workspaceId        String            @db.Uuid
+  inputVersionId     String?           @db.Uuid
+  assetId            String            @db.Uuid
+  role               ReferenceRole
+  sortOrder          Int               @default(0)
+  isPrimary          Boolean           @default(false)
+  createdAt          DateTime          @default(now())
+  workspace          ProductWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  inputVersion       ProductInputVersion? @relation(fields: [inputVersionId], references: [id], onDelete: SetNull)
+  asset              Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, sortOrder])
+  @@index([assetId])
+}
+
+model StrategyRun {
+  id                 String              @id @default(uuid()) @db.Uuid
+  workspaceId        String              @db.Uuid
+  inputVersionId     String              @db.Uuid
+  status             RunStatus           @default(PENDING)
+  model              String?
+  requestId          String?             @unique
+  productBlueprint   Json?
+  rawResponse        Json?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime            @default(now())
+  workspace          ProductWorkspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  inputVersion       ProductInputVersion @relation(fields: [inputVersionId], references: [id], onDelete: Restrict)
+  imagePlans         ImagePlan[]
+  modelRequests      ModelRequest[]
+
+  @@index([workspaceId, createdAt])
+}
+
+model ImagePlan {
+  id                 String             @id @default(uuid()) @db.Uuid
+  strategyRunId      String             @db.Uuid
+  taskKey            String
+  taskType           String
+  name               String
+  sortOrder          Int
+  createdAt          DateTime           @default(now())
+  strategyRun        StrategyRun        @relation(fields: [strategyRunId], references: [id], onDelete: Cascade)
+  versions           ImagePlanVersion[]
+  generationRuns     GenerationRun[]
+  feedbackThreads    FeedbackThread[]
+
+  @@unique([strategyRunId, taskKey])
+  @@index([strategyRunId, sortOrder])
+}
+
+model ImagePlanVersion {
+  id                 String            @id @default(uuid()) @db.Uuid
+  imagePlanId        String            @db.Uuid
+  version            Int
+  imageRole          String?
+  sellingFocus       String?
+  strategyContent    String
+  promptEn           String
+  copy               Json?
+  executionRules     Json?
+  usage              Json?
+  source             String            @default("AI")
+  createdById        String?           @db.Uuid
+  createdAt          DateTime          @default(now())
+  imagePlan          ImagePlan         @relation(fields: [imagePlanId], references: [id], onDelete: Cascade)
+  createdBy          User?             @relation("PlanVersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  generationRuns     GenerationRun[]
+  feedbackMessages   FeedbackMessage[]
+
+  @@unique([imagePlanId, version])
+  @@index([imagePlanId, createdAt])
+}
+
+model GenerationRun {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @db.Uuid
+  imagePlanId        String             @db.Uuid
+  imagePlanVersionId String             @db.Uuid
+  status             RunStatus          @default(PENDING)
+  model              String?
+  resolution         String?
+  complexity         String?
+  promptEnSnapshot   String
+  executionSnapshot  Json
+  referenceAssetIds  Json
+  requestId          String?            @unique
+  startedAt          DateTime?
+  completedAt        DateTime?
+  errorCode          String?
+  errorMessage       String?
+  createdById        String?            @db.Uuid
+  createdAt          DateTime           @default(now())
+  workspace          ProductWorkspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  imagePlan          ImagePlan          @relation(fields: [imagePlanId], references: [id], onDelete: Restrict)
+  imagePlanVersion   ImagePlanVersion   @relation(fields: [imagePlanVersionId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("GenerationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  generatedImages    GeneratedImage[]
+  modelRequests      ModelRequest[]
+
+  @@index([workspaceId, createdAt])
+  @@index([imagePlanId, createdAt])
+}
+
+model GeneratedImage {
+  id                 String         @id @default(uuid()) @db.Uuid
+  generationRunId    String         @db.Uuid
+  assetId            String?        @db.Uuid
+  imageUrlSnapshot   String?
+  width              Int?
+  height             Int?
+  requestResolution  String?
+  actualResolution   String?
+  isPrimaryResult    Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  generationRun      GenerationRun  @relation(fields: [generationRunId], references: [id], onDelete: Cascade)
+  asset              Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  feedbackThreads    FeedbackThread[]
+
+  @@index([generationRunId])
+}
+
+model FeedbackThread {
+  id                 String          @id @default(uuid()) @db.Uuid
+  workspaceId        String          @db.Uuid
+  imagePlanId        String          @db.Uuid
+  generatedImageId   String?         @db.Uuid
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  workspace          ProductWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  imagePlan          ImagePlan        @relation(fields: [imagePlanId], references: [id], onDelete: Cascade)
+  generatedImage     GeneratedImage?  @relation(fields: [generatedImageId], references: [id], onDelete: SetNull)
+  messages           FeedbackMessage[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+model FeedbackMessage {
+  id                 String            @id @default(uuid()) @db.Uuid
+  threadId           String            @db.Uuid
+  role               String
+  content            String
+  intent             String?
+  planVersionId      String?           @db.Uuid
+  modelPayload       Json?
+  createdById        String?           @db.Uuid
+  createdAt          DateTime          @default(now())
+  thread             FeedbackThread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  planVersion        ImagePlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+  createdBy          User?             @relation("FeedbackAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  attachments        FeedbackAttachment[]
+
+  @@index([threadId, createdAt])
+}
+
+model FeedbackAttachment {
+  id                 String          @id @default(uuid()) @db.Uuid
+  messageId          String          @db.Uuid
+  assetId            String          @db.Uuid
+  createdAt          DateTime        @default(now())
+  message            FeedbackMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  asset              Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, assetId])
+}
+
+model ModelRequest {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @db.Uuid
+  workspaceId        String?           @db.Uuid
+  strategyRunId      String?           @db.Uuid
+  generationRunId    String?           @db.Uuid
+  actorId            String?           @db.Uuid
+  type               ModelRequestType
+  provider           String?
+  model              String?
+  requestId          String?
+  status             RunStatus         @default(PENDING)
+  inputTokens        Int?
+  outputTokens       Int?
+  imageCount         Int?
+  costUsd            Decimal?          @db.Decimal(12, 6)
+  durationMs         Int?
+  errorCode          String?
+  errorMessage       String?
+  requestSnapshot    Json?
+  responseSnapshot   Json?
+  createdAt          DateTime          @default(now())
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace          ProductWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  strategyRun        StrategyRun?      @relation(fields: [strategyRunId], references: [id], onDelete: SetNull)
+  generationRun      GenerationRun?    @relation(fields: [generationRunId], references: [id], onDelete: SetNull)
+  actor              User?             @relation("ModelRequestActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([workspaceId, type, createdAt])
+  @@index([requestId])
+}
+
+model AuditEvent {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @db.Uuid
+  workspaceId        String?           @db.Uuid
+  actorId            String?           @db.Uuid
+  action             String
+  entityType         String
+  entityId           String?
+  metadata           Json?
+  createdAt          DateTime          @default(now())
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace          ProductWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  actor              User?             @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([workspaceId, createdAt])
+}

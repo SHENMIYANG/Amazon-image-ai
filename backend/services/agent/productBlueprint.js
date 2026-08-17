@@ -39,8 +39,12 @@ export function splitProductItems(value = '', maxItems = 16) {
   return String(value || '')
     .replace(/\r\n/g, '\n')
     .split(/[|,，、;；\n]/)
-    .map((item) => item.replace(/^[\s\d\-*.(（【]+/, '').replace(/[)）】]\s*$/, '').trim())
-    .map((item) => item.replace(/\s*\(\s*\d+[^)]*\)\s*$/g, '').trim())
+    .map((item) => item.replace(/^[\s\d\-*.(（【]+/, '').trim())
+    .map((item) => item
+      .replace(/\s*[（(]\s*\d+(?:\s*(?:套|个|件|双|支|只|片))?\s*[）)]\s*$/g, '')
+      .replace(/[)）】]\s*$/, '')
+      .trim()
+    )
     .filter((item) => item.length >= 2)
     .filter((item, index, source) => source.findIndex((candidate) => candidate === item) === index)
     .slice(0, maxItems)
@@ -56,7 +60,11 @@ function extractIncludedItems(sourceText = '') {
   ].filter(Boolean)
 
   if (matches.length === 0) return []
-  return splitProductItems(matches[0][1])
+
+  const contents = matches[0][1]
+    .replace(/\s*(?:【)?(?:尺寸规格|尺寸|包装盒|材质描述|卖点描述|目标受众|使用方式|场景图要求|图片要求)\s*[:：].*$/i, '')
+
+  return splitProductItems(contents)
 }
 
 function hasExplicitGiftBundle(sourceText = '', includedItems = []) {
@@ -168,7 +176,11 @@ function sanitizeBundleItems(items = [], fallbackItems = [], context = '') {
   const allowGift = hasExplicitGiftBundle(context, explicitIncludedItems)
   const structuralNoise = /(transparent glass|top and bottom caps|colored sand|printed time marks|glass part|wood part|hourglass timer body|透明玻璃|木盖|底座|细沙|印刷文字|瓶身|流沙通道)/i
   const giftNoise = /(gift box|included gift items|geschenkbox|礼盒|礼物|礼品盒|包装盒)/i
-  const source = normalizeStringArray(items, 16, 100).length > 0
+  // A user-supplied contents list is product truth. The model may describe it,
+  // but it must not replace named included items with repeated product titles.
+  const source = explicitIncludedItems.length > 1
+    ? explicitIncludedItems
+    : normalizeStringArray(items, 16, 100).length > 0
     ? normalizeStringArray(items, 16, 100)
     : fallbackItems
 
@@ -435,6 +447,7 @@ export function normalizeProductBlueprint(value, fallbackInput) {
       market: String(identity.market || fallback.identity.market).trim(),
       archetype: normalizedArchetype
     },
+    confirmedDimensions: String(fallbackInput?.dimensions || '').trim(),
     appearance: {
       color: String(appearance.color || normalizeStringArray(appearance.primaryColor, 6).join(', ') || fallback.appearance.color).trim(),
       material: String(appearance.material || normalizeStringArray(appearance.material, 6).join(', ') || fallback.appearance.material).trim(),

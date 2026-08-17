@@ -193,31 +193,68 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
 
   return expandImageTasks(config).map((task, index) => {
     const existing = existingByTaskKey.get(task.taskKey)
-    const hasPromptValue = existing && Object.prototype.hasOwnProperty.call(existing, 'prompt')
     const hasPlaceholderValue = existing && Object.prototype.hasOwnProperty.call(existing, 'placeholder')
 
-    return {
+    const normalizedPlan = normalizeImagePlan(existing, {
       id: index + 1,
       name: task.name,
       taskType: task.taskType,
       taskKey: task.taskKey,
       type: task.taskType,
-      imageRole: existing?.imageRole || '',
-      sellingFocus: existing?.sellingFocus || existing?.primarySellingPoint || '',
-      currentImageProductUsage: existing?.currentImageProductUsage || existing?.imageProductUsage || {},
       blueprint: task.blueprint,
       purpose: task.description,
-      executionRules: existing?.executionRules || existing?.constraints || [],
-      copy: existing?.copy || [],
-      strategyContent:
-        existing?.strategyContent ||
-        existing?.strategyBody ||
-        (hasPromptValue ? existing.prompt : task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : ''),
+      strategyContent: task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : '',
       placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
-      promptEn: existing?.promptEn || '',
-      promptDirty: existing?.promptDirty || false
+      promptEn: '',
+      promptDirty: false
+    })
+
+    // The selected task is the stable plan identity. Do not retain an old or
+    // model-provided numeric id here, otherwise React can merge two cards.
+    return {
+      ...normalizedPlan,
+      id: index + 1,
+      taskKey: task.taskKey
     }
   })
+}
+
+// Keep legacy saved plans readable at the boundary while new code uses one shape.
+export function normalizeImagePlan(plan = {}, defaults = {}) {
+  const source = plan || {}
+  const fallback = defaults || {}
+  const executionRules = Array.isArray(source.executionRules)
+    ? source.executionRules
+    : Array.isArray(source.constraints)
+      ? source.constraints
+      : Array.isArray(fallback.executionRules)
+        ? fallback.executionRules
+        : []
+  const rawImageProductUsage =
+    source.currentImageProductUsage || source.imageProductUsage || fallback.currentImageProductUsage || {}
+  const { doNotShowAsIncluded: _legacyDoNotShowAsIncluded, ...currentImageProductUsage } =
+    rawImageProductUsage && typeof rawImageProductUsage === 'object'
+      ? rawImageProductUsage
+      : {}
+
+  return {
+    ...fallback,
+    ...source,
+    id: source.id ?? fallback.id,
+    taskKey: source.taskKey || fallback.taskKey || '',
+    taskType: source.taskType || source.type || fallback.taskType || fallback.type || '',
+    type: source.taskType || source.type || fallback.type || fallback.taskType || '',
+    name: source.name || fallback.name || '',
+    imageRole: source.imageRole || fallback.imageRole || '',
+    sellingFocus: source.sellingFocus || source.primarySellingPoint || fallback.sellingFocus || '',
+    currentImageProductUsage,
+    executionRules,
+    copy: Array.isArray(source.copy) ? source.copy : (Array.isArray(fallback.copy) ? fallback.copy : []),
+    strategyContent:
+      source.strategyContent || source.strategyBody || source.prompt || fallback.strategyContent || '',
+    promptEn: source.promptEn || fallback.promptEn || '',
+    promptDirty: source.promptDirty === true
+  }
 }
 
 export function getTaskLabel(taskType) {

@@ -14,12 +14,22 @@ import {
 import { postJsonWithRetry } from '../utils/upstreamRetry.js'
 import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
 import { ensureUploadsDir, resolveUploadPathFromUrl } from '../utils/uploads.js'
+import { persistGenerationResult } from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
 const strategyTranslationCache = new Map()
 const MAX_TRANSLATION_CACHE_ENTRIES = 200
 
+function getMaxReferenceImages() {
+  const configuredLimit = Number(process.env.IMAGE_MAX_REFERENCE_IMAGES || 8)
+  return Number.isFinite(configuredLimit)
+    ? Math.max(1, Math.min(8, Math.floor(configuredLimit)))
+    : 8
+}
+
 router.post('/', async (req, res) => {
+  const generationRequestId = `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
+  const startedAt = Date.now()
   try {
     const {
       listing,
@@ -33,10 +43,13 @@ router.post('/', async (req, res) => {
       executionContext
     } = req.body
 
-    if (!listing || !imagePlans || imagePlans.length === 0) {
+    const hasLegacyPayload = listing && Array.isArray(imagePlans) && imagePlans.length > 0
+    const hasExecutionPayload = executionContext?.product && executionContext?.strategy
+
+    if (!hasLegacyPayload && !hasExecutionPayload) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: 'Listing and imagePlans are required'
+        message: 'executionContext or legacy listing and imagePlans are required'
       })
     }
 
@@ -61,6 +74,20 @@ router.post('/', async (req, res) => {
     })
 
     const hasReferenceImages = executionReferenceImages && executionReferenceImages.length > 0
+    const plansMissingSavedPrompt = executionPlans.filter((plan) => {
+      const taskType = plan.taskType
+      return taskType !== 'main' && (
+        plan.promptDirty ||
+        !String(plan.promptEn || '').trim()
+      )
+    })
+
+    if (plansMissingSavedPrompt.length > 0) {
+      return res.status(400).json({
+        error: 'Unsaved English execution strategy',
+        message: `图${plansMissingSavedPrompt.map((plan) => plan.id).join('、')}的英文执行稿未保存，请先保存后再生成。`
+      })
+    }
 
     const apiKey = process.env.IMAGE_GEN_API_KEY || process.env.OPENAI_API_KEY
     const baseUrl = process.env.IMAGE_GEN_BASE_URL || process.env.OPENAI_BASE_URL
@@ -108,7 +135,7 @@ router.post('/', async (req, res) => {
       }
       const orderedReferenceImages = candidateReferenceImages
         .sort((left, right) => referencePriority(left) - referencePriority(right))
-        .slice(0, 4)
+        .slice(0, getMaxReferenceImages())
 
       refImagePaths = orderedReferenceImages.map((imageUrl) => resolveUploadPathFromUrl(imageUrl))
       orderedReferenceRoles = orderedReferenceImages.map((imageUrl, index) => ({
@@ -130,9 +157,10 @@ router.post('/', async (req, res) => {
     for (const plan of executionPlans) {
       try {
         const taskType = plan.taskType || plan.type || 'feature'
-        const normalizedPlan = taskType === 'main' && !plan.regenerationMode
-          ? { ...plan, originalPrompt: plan.strategyContent || '' }
-          : await translatePlanPromptIfNeeded(plan, executionListing, size)
+        const normalizedPlan = {
+          ...plan,
+          originalPrompt: plan.strategyContent || ''
+        }
         const taskReferenceAssets = selectReferenceAssetsForTask({
           taskType,
           refImagePaths,
@@ -154,7 +182,7 @@ router.post('/', async (req, res) => {
           apiKey,
           baseUrl,
           model,
-          taskType: plan.taskType || plan.type || 'feature'
+          taskType: plan.taskType
         })
 
         const requestedWidth = Number(size.split('x')[0])
@@ -164,9 +192,14 @@ router.post('/', async (req, res) => {
         generatedImages.push({
           imageId: plan.id,
           name: plan.name,
-          taskType: plan.taskType || plan.type || null,
+          taskType: plan.taskType || null,
           imageRole: plan.imageRole || null,
-          sellingFocus: plan.sellingFocus || plan.primarySellingPoint || null,
+          sellingFocus: plan.sellingFocus || null,
+          currentImageProductUsage: plan.currentImageProductUsage,
+          executionRules: plan.executionRules,
+          copy: plan.copy || [],
+          referenceImagesUsed: hasReferenceImages ? taskReferenceAssets.refImagePaths.length : 0,
+          referenceImageRolesUsed: taskReferenceAssets.orderedReferenceRoles,
           imageUrl: generatedImage.imageUrl,
           prompt,
           promptEn: normalizedPlan.promptEn || '',
@@ -185,9 +218,9 @@ router.post('/', async (req, res) => {
         generatedImages.push({
           imageId: plan.id,
           name: plan.name,
-          taskType: plan.taskType || plan.type || null,
+          taskType: plan.taskType || null,
           imageRole: plan.imageRole || null,
-          sellingFocus: plan.sellingFocus || plan.primarySellingPoint || null,
+          sellingFocus: plan.sellingFocus || null,
           status: 'failed',
           error: errorMessage,
           prompt: buildAmazonPrompt(
@@ -197,7 +230,7 @@ router.post('/', async (req, res) => {
             size,
             explicitPrimaryReferenceImageUrl,
             selectReferenceAssetsForTask({
-              taskType: plan.taskType || plan.type || 'feature',
+              taskType: plan.taskType,
               refImagePaths,
               orderedReferenceRoles
             }).orderedReferenceRoles
@@ -206,10 +239,19 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const persistence = await persistGenerationResult({
+      executionContext,
+      images: generatedImages,
+      model,
+      requestId: generationRequestId,
+      durationMs: Date.now() - startedAt
+    })
+
     res.json({
       success: true,
       images: generatedImages,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      persistence
     })
   } catch (error) {
     console.error('Generate error:', error.response?.data || error.message)
@@ -306,6 +348,7 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
   }
 
   const dimensions = readImageDimensions(imageBuffer)
+  assertGeneratedImageDimensions(dimensions, size)
   const outputFilename = 'generated-' + Date.now() + '-' + Math.round(Math.random() * 1e9) + '.png'
   const outputPath = path.join(ensureUploadsDir(), outputFilename)
   fs.writeFileSync(outputPath, imageBuffer)
@@ -324,6 +367,9 @@ function getImageGenerationTimeoutMs() {
 
 function formatGenerateError(err) {
   const rawMessage = err.response?.data?.message || err.response?.data?.error?.message || err.message || '图片生成失败'
+  if (err.code === 'INVALID_GENERATED_IMAGE_DIMENSIONS') {
+    return rawMessage
+  }
   const isTimeout = err.code === 'ECONNABORTED' || String(rawMessage).toLowerCase().includes('timeout')
 
   if (isTimeout) {
@@ -331,6 +377,27 @@ function formatGenerateError(err) {
   }
 
   return rawMessage
+}
+
+function normalizeExecutionPlan(plan = {}) {
+  const source = plan || {}
+
+  return {
+    ...source,
+    taskType: source.taskType || source.type || 'feature',
+    type: source.taskType || source.type || 'feature',
+    sellingFocus: source.sellingFocus || source.primarySellingPoint || '',
+    currentImageProductUsage: source.currentImageProductUsage || source.imageProductUsage || {},
+    strategyContent: source.strategyContent || source.strategyBody || source.prompt || '',
+    promptEn: source.promptEn || '',
+    promptDirty: source.promptDirty === true,
+    executionRules: Array.isArray(source.executionRules)
+      ? source.executionRules
+      : Array.isArray(source.constraints)
+        ? source.constraints
+        : [],
+    copy: Array.isArray(source.copy) ? source.copy : []
+  }
 }
 
 function normalizeExecutionRequest({
@@ -365,7 +432,7 @@ function normalizeExecutionRequest({
       listing.productBlueprint
   }
 
-  const executionPlans = executionStrategy
+  const rawExecutionPlans = executionStrategy
     ? [
         {
           ...imagePlans[0],
@@ -375,6 +442,7 @@ function normalizeExecutionRequest({
         }
       ]
     : imagePlans
+  const executionPlans = rawExecutionPlans.map((plan) => normalizeExecutionPlan(plan))
 
   return {
     executionListing,
@@ -421,6 +489,24 @@ function readImageDimensions(buffer) {
   if (webpDimensions.width && webpDimensions.height) return webpDimensions
 
   return { width: null, height: null }
+}
+
+export function assertGeneratedImageDimensions(dimensions = {}, requestedSize = '2048x2048') {
+  const [requestedWidth, requestedHeight] = String(requestedSize || '').split('x').map(Number)
+  const width = Number(dimensions?.width)
+  const height = Number(dimensions?.height)
+
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    const error = new Error('图片接口返回了无法识别尺寸的图片，未保存该结果。')
+    error.code = 'INVALID_GENERATED_IMAGE_DIMENSIONS'
+    throw error
+  }
+
+  if (width !== requestedWidth || height !== requestedHeight) {
+    const error = new Error(`图片接口返回 ${width}x${height}，但本次要求 ${requestedSize} 方图，未保存该结果。`)
+    error.code = 'INVALID_GENERATED_IMAGE_DIMENSIONS'
+    throw error
+  }
 }
 
 function readPngDimensions(buffer) {
@@ -660,10 +746,6 @@ function buildMainImagePrompt(listing, imagePlan, productBlueprint, visualBluepr
     lines.push('Keep these real product parts visible and structurally connected: ' + visibleParts.join(', ') + '.')
   }
 
-  if (productBlueprint.identity?.archetype === 'Clamp Mounted Device') {
-    lines.push('For isolated main-image presentation, show the clamp as part of the product itself and do not attach it to glass, mesh, tank walls, desks, frames, or any external support surface.')
-  }
-
   lines.push(
     'No text, no watermark, no added logo, no props, no animals, no environment, no decorative elements.',
     'Preserve real product shape, proportions, materials, color, and included accessories from the primary reference image.',
@@ -754,6 +836,7 @@ function getProductBlueprint(listing = {}) {
       market: cleanPromptText(identity.market || ('Amazon ' + (listing.marketplace || 'UK'))),
       archetype: cleanPromptText(identity.archetype || inferArchetype(rawContext))
     },
+    confirmedDimensions: cleanPromptText(blueprint.confirmedDimensions || listing.dimensions || ''),
     appearance: {
       color: cleanPromptText(appearance.color || normalizeStringArray(appearance.primaryColor, 6).join(', ')),
       material: cleanPromptText(
@@ -829,6 +912,7 @@ function formatReferenceRoles(referenceImageRoles = []) {
   const labels = {
     primary_product: 'primary product truth reference',
     supporting_product: 'supporting product angle or detail reference',
+    layout_style_reference: 'layout or style reference only; it must not change product truth',
     regeneration_reference: 'user-added reference for this regeneration only'
   }
 
@@ -845,13 +929,11 @@ function summarizeProductTruth(productBlueprint = {}) {
   }
 
   add('product', productBlueprint.identity?.productType)
-  add('core purpose', productBlueprint.identity?.corePurpose)
+  add('confirmed dimensions', productBlueprint.confirmedDimensions)
   add('real colors', productBlueprint.appearance?.color)
   add('material', productBlueprint.appearance?.material)
   add('visible parts', productBlueprint.structure?.mainParts)
   add('part relationships', productBlueprint.structure?.importantRelationships)
-  add('usage scenario', productBlueprint.usage?.usageScenario)
-  add('user interaction', productBlueprint.usage?.userInteraction)
   add('must keep', productBlueprint.productRules?.mustKeep)
   add('forbidden', productBlueprint.productRules?.forbidden)
   return facts
@@ -875,7 +957,7 @@ function summarizeVisualEvidence(productBlueprint = {}) {
 }
 
 function summarizeCurrentImageProductUsage(imagePlan = {}) {
-  const usage = imagePlan.currentImageProductUsage || imagePlan.imageProductUsage
+  const usage = imagePlan.currentImageProductUsage
   if (!usage || typeof usage !== 'object') return []
 
   const lines = []
@@ -887,10 +969,22 @@ function summarizeCurrentImageProductUsage(imagePlan = {}) {
   add('display mode', usage.displayMode)
   add('required items for this image', usage.requiredItems)
   add('optional items for this image', usage.optionalItems)
-  add('do not show as included', usage.doNotShowAsIncluded)
   add('reason', usage.reason)
 
   return lines
+}
+
+function getProductPresentationFallback(imagePlan = {}, taskType = '') {
+  const displayMode = String(imagePlan?.currentImageProductUsage?.displayMode || '').trim()
+  if (displayMode === 'full_set') {
+    return 'Show the confirmed complete set and its required items exactly as the strategy states.'
+  }
+
+  if (!displayMode && taskType !== 'detail') {
+    return 'Keep the product recognizable and do not crop away important structure unless the strategy requests a close-up.'
+  }
+
+  return ''
 }
 
 function summarizeProductExclusions(productBlueprint = {}) {
@@ -1033,7 +1127,6 @@ function buildPromptWithLimit(coreSections = [], optionalSections = [], suffix =
 export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const sourcePrompt = plan?.strategyContent || ''
   const sourceExecutionRules = normalizeStringArray(plan?.executionRules || plan?.constraints, 12).join('\n')
-  const sourceProductUsage = summarizeCurrentImageProductUsage(plan).join('\n')
   const promptEn = plan?.promptEn || ''
 
   if (promptEn && !plan.promptDirty) {
@@ -1064,7 +1157,7 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   const targetLanguage = getTargetImageLanguage(listing)
   const cacheKey = crypto
     .createHash('sha256')
-    .update([model, targetLanguage, sourcePrompt, sourceProductUsage, sourceExecutionRules].join('\n'))
+    .update([model, targetLanguage, sourcePrompt, sourceExecutionRules].join('\n'))
     .digest('hex')
   const cachedTranslation = strategyTranslationCache.get(cacheKey)
   if (cachedTranslation) {
@@ -1089,9 +1182,6 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   if (sourceExecutionRules) {
     userMessageSections.push('- Hard execution rules that must remain exact:', sourceExecutionRules)
   }
-  if (sourceProductUsage) {
-    userMessageSections.push('- Current image product usage that must remain exact:', sourceProductUsage)
-  }
   userMessageSections.push(
     '',
     'Canonical Chinese strategy:',
@@ -1100,10 +1190,6 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   if (sourceExecutionRules) {
     userMessageSections.push('', 'Canonical Chinese execution rules:', sourceExecutionRules)
   }
-  if (sourceProductUsage) {
-    userMessageSections.push('', 'Current image product usage:', sourceProductUsage)
-  }
-
   const userMessage = userMessageSections.join('\n')
 
   const response = await postJsonWithRetry(
@@ -1181,9 +1267,6 @@ export function buildAmazonPrompt(
   }
 
   const truthFacts = summarizeProductTruth(productBlueprint)
-  const usageContract = summarizeUsageContract(productBlueprint)
-  const visibleEvidence = summarizeVisualEvidence(productBlueprint)
-  const imageProductUsage = summarizeCurrentImageProductUsage(imagePlan)
   const negativeFacts = summarizeProductExclusions(productBlueprint)
   const executionRules = normalizeStringArray(imagePlan?.executionRules || imagePlan?.constraints, 10)
   const complexityLine = {
@@ -1196,9 +1279,9 @@ export function buildAmazonPrompt(
     'Use the primary product reference as the highest truth source for product identity, shape, structure, proportion, color, material appearance, and included parts.',
     'Generate the image from scratch but keep the same real product. Do not redesign the product. Do not add, remove, merge, deform, recolor, substitute, duplicate, or omit product parts.',
     truthFacts.length > 0 ? 'Confirmed product truth: ' + truthFacts.join(' | ') + '.' : '',
-    usageContract.length > 0 ? 'Confirmed real-use contract: ' + usageContract.join(' | ') + '.' : '',
-    imageProductUsage.length > 0 ? 'Current image product usage: ' + imageProductUsage.join(' | ') + '.' : '',
-    visibleEvidence.length > 0 ? 'Visible proof that must appear: ' + visibleEvidence.join(' | ') + '.' : '',
+    productBlueprint.confirmedDimensions
+      ? 'Only render numeric measurements that are explicitly present in confirmed dimensions. Omit any other measurement instead of estimating it.'
+      : 'Do not render numeric measurements unless the current strategy explicitly provides a confirmed value.',
     negativeFacts.length > 0 ? 'Hard visual exclusions: ' + negativeFacts.join(' | ') + '.' : '',
     executionRules.length > 0 ? 'Execution protection rules: ' + executionRules.join(' | ') + '.' : '',
     formatReferenceRoles(referenceImageRoles) ? 'Reference image order: ' + formatReferenceRoles(referenceImageRoles) + '.' : '',
@@ -1209,9 +1292,6 @@ export function buildAmazonPrompt(
   ]
 
   const optionalSections = [
-    taskType === 'detail'
-      ? 'A detail image may zoom in, but visible product structure and material truth must still remain correct.'
-      : 'Keep the product visually complete and recognizable. Do not crop away key structure, accessories, controller, cable, clamp, base, or other major parts unless the strategy explicitly asks for a tight detail crop.',
     imagePlan?.regenerationMode
       ? 'This is a regeneration request. Respect the latest edited strategy wording exactly.'
       : ''

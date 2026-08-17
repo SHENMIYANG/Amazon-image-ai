@@ -202,11 +202,12 @@ Hard rules:
 12. Do not invent hidden geometry, unsupported quantities, unverified accessories, or unconfirmed claims.
 13. When image count is small, prioritize the biggest buying reasons first. When image count is larger, expand into detail, trust, usage, and supporting proof.
 14. Text is forbidden only for the Amazon main image. Non-main images may use concise copy when it helps conversion or understanding.
-15. executionRules are mandatory for every non-main image. They are jailbreak guards for image generation, not another strategy paragraph. Write concise Chinese hard red lines only: what must not be changed, invented, omitted, mismatched, exaggerated, cropped, occluded, or placed in an impossible way. Do not repeat strategyContent. Do not include scene ideas, layout ideas, selling-point explanations, or copy-writing placeholders.
+15. executionRules is the current image's execution protection for the image model and must be written in Chinese for the operator. Every non-main image must return one or more concrete rules from this image's strategy, product facts, references, and real usage. Prevent only real risks: wrong product structure, accessories, quantity, dimensions, copy, contact, use, placement, or physical relationship. Do not repeat the full strategy, use generic slogans, write English rules, or invent a fixed number of rules.
 16. productRules.mustKeep and productRules.forbidden must not be empty. They must be derived from the actual product images and product facts, not from generic category assumptions.
 17. copy must list the exact on-image text planned for that image. If the strategy says title, subtitle, tag, label, or copy, put those text lines in copy too. If copy is used, strategyContent must also show the exact same text in quotes. Do not ask the image model to invent copy.
 18. currentImageProductUsage must decide which products or accessories are needed for this one image. Use displayMode as one of: full_set, selected_items, single_item, detail_part. Do not force full-set quantity into scenario or detail images unless that image is explicitly about the full set.
 19. Do not make gift boxes, storage boxes, ribbons, cards, packaging, organizers, props, or display containers the image mission unless the user explicitly says they are included or required. If they are only scene props, state that they are props and must not be understood as included accessories.
+20. Supplied dimensions and explicitly named included items are confirmed facts. Do not alter, estimate, expand, or invent their values. If a requested image needs a fact that is not supplied or clearly visible in a reference image, omit that fact instead of guessing.
 
 ${visualMarketingMethodology}
 

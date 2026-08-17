@@ -53,6 +53,33 @@ function normalizeMessages(messages = []) {
     .filter((message) => message.content.trim())
 }
 
+function normalizeRevision(revision = {}) {
+  return {
+    strategyContent: String(revision.strategyContent || '').trim(),
+    promptEn: String(revision.promptEn || '').trim(),
+    executionRules: Array.isArray(revision.executionRules)
+      ? revision.executionRules.map((rule) => String(rule || '').trim()).filter(Boolean)
+      : []
+  }
+}
+
+function getEffectiveRevision(revision = {}, payload = {}) {
+  const currentRevision = payload.currentRevision || {}
+  const imagePlan = payload.imagePlan || {}
+  const generatedImage = payload.generatedImage || {}
+
+  return {
+    strategyContent:
+      revision.strategyContent || currentRevision.strategyContent || imagePlan.strategyContent || generatedImage.strategyContent || '',
+    promptEn:
+      revision.promptEn || currentRevision.promptEn || imagePlan.promptEn || generatedImage.promptEn || '',
+    executionRules:
+      revision.executionRules.length > 0
+        ? revision.executionRules
+        : currentRevision.executionRules || imagePlan.executionRules || generatedImage.executionRules || []
+  }
+}
+
 function buildSystemPrompt() {
   return [
     '你是当前单张亚马逊商品图的反馈修图助手，兼具亚马逊运营、电商视觉策划和英文生图执行稿编辑能力。',
@@ -139,19 +166,23 @@ router.post('/chat', async (req, res) => {
       })
     }
 
-    const revision = parsed.revision || {}
+    const revision = normalizeRevision(parsed.revision)
+    const intent = parsed.intent === 'generate_ready' ? 'generate_ready' : 'discuss'
+    const effectiveRevision = getEffectiveRevision(revision, req.body || {})
+
+    if (intent === 'generate_ready' && (!effectiveRevision.strategyContent || !effectiveRevision.promptEn)) {
+      return res.status(422).json({
+        success: false,
+        message: '图片反馈没有得到完整的中文策略或英文执行稿，请先让 AI 补全本图修改方案。'
+      })
+    }
+
     res.json({
       success: true,
       data: {
-        intent: parsed.intent === 'generate_ready' ? 'generate_ready' : 'discuss',
+        intent,
         reply: String(parsed.reply || '').trim(),
-        revision: {
-          strategyContent: String(revision.strategyContent || '').trim(),
-          promptEn: String(revision.promptEn || '').trim(),
-          executionRules: Array.isArray(revision.executionRules)
-            ? revision.executionRules.map((rule) => String(rule || '').trim()).filter(Boolean)
-            : []
-        },
+        revision,
         finalInstruction: String(parsed.finalInstruction || '').trim()
       }
     })

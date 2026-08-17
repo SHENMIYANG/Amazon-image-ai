@@ -7,9 +7,14 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "test:generation-pipeline": "node test-generation-pipeline.js"
+    "test:generation-pipeline": "node test-generation-pipeline.js",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:studio": "prisma studio --schema prisma/schema.prisma"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -17,6 +22,10 @@
     "form-data": "^4.0.5",
     "multer": "^2.1.1",
     "openai": "^4.0.0",
+    "pg": "^8.23.0",
     "sharp": "^0.34.3"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3"
   }
 }

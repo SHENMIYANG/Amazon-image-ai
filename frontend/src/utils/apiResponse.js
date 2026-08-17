@@ -38,8 +38,8 @@ export function formatApiError(error, label = '请求') {
 
   if (status) {
     const statusMessage = getHttpStatusMessage(status)
-    if (rawMessage && !rawMessage.includes(`HTTP ${status}`)) {
-      return `${label}失败（HTTP ${status}）：${statusMessage}\n后端返回：${rawMessage}`
+    if (rawMessage && rawMessage !== statusMessage && !rawMessage.includes(`HTTP ${status}`)) {
+      return `${label}失败（HTTP ${status}）：${rawMessage}`
     }
     return `${label}失败（HTTP ${status}）：${statusMessage}`
   }

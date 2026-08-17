@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
-import { buildAmazonPrompt, normalizeAmazonMainImage } from './routes/generate.js'
+import {
+  assertGeneratedImageDimensions,
+  buildAmazonPrompt,
+  normalizeAmazonMainImage
+} from './routes/generate.js'
+import {
+  getDistinctSellingPoints,
+  getIncompleteStrategyPlanIds
+} from './routes/agent-analyze.js'
+import { normalizeExecutionRules } from './services/agent/executionRules.js'
+import { normalizeProductBlueprint } from './services/agent/productBlueprint.js'
 
 async function testMainImageNormalization() {
   const source = await sharp({
@@ -111,18 +121,192 @@ function testScenarioUsageContract() {
     [{ index: 1, role: 'primary_product' }, { index: 2, role: 'supporting_product' }]
   )
 
-  assert.match(prompt, /glass edge held between both clamp jaws/)
-  assert.match(prompt, /clamp and lamp remain outside the tank/)
-  assert.match(prompt, /clamp penetrating glass/)
-  assert.match(prompt, /support edge visibly sandwiched between two clamp jaws/)
   assert.match(prompt, /Both clamp jaws must visibly grip opposite sides of the glass edge/)
+  assert.match(prompt, /The lamp and clamp must stay outside the tank/)
+  assert.match(prompt, /No part of the product may penetrate, float, or fuse with the glass/)
   assert.match(prompt, /Create a three-quarter terrarium corner image/)
   assert.match(prompt, /Reference image order: image 1: primary product truth reference/)
   assert.doesNotMatch(prompt, /RAW LISTING TEXT SHOULD NOT DRIVE FINAL PROMPT/)
   assert.doesNotMatch(prompt, /RAW ADDITIONAL INFO SHOULD NOT DRIVE FINAL PROMPT/)
+  assert.doesNotMatch(prompt, /support edge visibly sandwiched between two clamp jaws/)
   assert.ok(prompt.length < 6500, `scenario prompt is too long: ${prompt.length}`)
+}
+
+function testGeneratedImageSizeContract() {
+  assert.doesNotThrow(() => assertGeneratedImageDimensions({ width: 2048, height: 2048 }, '2048x2048'))
+  assert.throws(
+    () => assertGeneratedImageDimensions({ width: 1774, height: 887 }, '2048x2048'),
+    /要求 2048x2048 方图/
+  )
+  assert.throws(
+    () => assertGeneratedImageDimensions({ width: null, height: null }, '2048x2048'),
+    /无法识别尺寸/
+  )
+}
+
+function testStrategyContractAndInputDeduplication() {
+  const listingSource = '【产品名称】: Test Product\n【卖点描述】: 卖点 A\n卖点 B'
+  assert.equal(getDistinctSellingPoints('卖点 A\n卖点 B', listingSource), '')
+  assert.equal(getDistinctSellingPoints('独立补充卖点', listingSource), '独立补充卖点')
+
+  assert.deepEqual(
+    getIncompleteStrategyPlanIds([
+      { id: 1, taskType: 'main', strategyContent: 'fixed', promptEn: 'fixed' },
+      { id: 2, taskType: 'feature', strategyContent: '中文策略', promptEn: '' },
+      { id: 3, taskType: 'detail', strategyContent: '', promptEn: 'English prompt' }
+    ]),
+    [2, 3]
+  )
+
+}
+
+function testExecutionRulesRemainVisibleWhenTheyReinforceStrategy() {
+  const strategyContent = '必须保留真实产品结构。不得新增不存在的配件。'
+  const rules = normalizeExecutionRules(
+    {
+      executionRules: [
+        '必须保留真实产品结构',
+        '不得新增不存在的配件'
+      ]
+    },
+    strategyContent,
+    { productRules: { forbidden: [] } },
+    'feature',
+    { displayMode: 'selected_items' }
+  )
+
+  assert.deepEqual(rules, [
+    '必须保留真实产品结构',
+    '不得新增不存在的配件'
+  ])
+}
+
+function testEnglishExecutionRulesUseChineseFallback() {
+  const rules = normalizeExecutionRules(
+    {
+      executionRules: [
+        'Do not alter the confirmed product structure.',
+        'Do not add unconfirmed accessories.'
+      ]
+    },
+    '中文策略。',
+    { productRules: { forbidden: [] } },
+    'feature',
+    { displayMode: 'selected_items' }
+  )
+
+  assert.deepEqual(rules, [
+    '不得改变参考图中确认的产品结构、颜色、比例、数量和标配配件。'
+  ])
+}
+
+function testExecutionRulesKeepModelSpecificQuantityAndContactRules() {
+  const rules = normalizeExecutionRules({
+    executionRules: [
+      '完整套装必须展示 6 个沙漏，不得多于或少于 6 个。',
+      '扳手开口必须对准脚踏轴螺母。',
+      '文案用短句说明厨房计时。',
+      '扳手开口必须对准脚踏轴螺母。'
+    ]
+  })
+
+  assert.deepEqual(rules, [
+    '完整套装必须展示 6 个沙漏，不得多于或少于 6 个。',
+    '扳手开口必须对准脚踏轴螺母。'
+  ])
+}
+
+function testExplicitBundleItemsAndDimensionsWin() {
+  const blueprint = normalizeProductBlueprint(
+    {
+      bundleRules: {
+        includedItems: Array.from({ length: 10 }, () => 'Pink Bow Gift Box')
+      }
+    },
+    {
+      productName: 'Pink Bow Gift Box',
+      listingInfo: '产品包含：礼盒 (1) | 玻璃杯及吸管 (1套) | 发带 (1) | 化妆包 (1) | 化妆刷 (8)',
+      dimensions: '包装盒：28 x 20 x 9cm',
+      signals: {},
+      referenceImages: []
+    }
+  )
+
+  assert.deepEqual(blueprint.bundleRules.includedItems, [
+    '礼盒',
+    '玻璃杯及吸管',
+    '发带',
+    '化妆包',
+    '化妆刷'
+  ])
+  assert.equal(blueprint.confirmedDimensions, '包装盒：28 x 20 x 9cm')
+}
+
+function testCurrentImageUsageDoesNotInventBundleExclusions() {
+  const detailUsage = normalizeExecutionRules(
+    {
+      executionRules: ['不得改变产品结构。']
+    },
+    '展示玻璃杯局部细节。',
+    { bundleRules: { includedItems: ['玻璃杯', '吸管', '礼盒'] } },
+    'detail',
+    { displayMode: 'detail_part' }
+  )
+
+  assert.deepEqual(detailUsage, ['不得改变产品结构。'])
+}
+
+function testConfirmedDimensionsProtectGeneration() {
+  const prompt = buildAmazonPrompt(
+    {
+      productName: 'Gift set',
+      productBlueprint: {
+        identity: { productType: 'Gift set' },
+        confirmedDimensions: '包装盒：28 x 20 x 9 cm'
+      }
+    },
+    {
+      taskType: 'dimensions',
+      strategyContent: '展示包装盒尺寸。',
+      promptEn: 'Show the package dimensions.',
+      executionRules: ['不得标注未确认尺寸。']
+    },
+    'L2',
+    '2048x2048'
+  )
+
+  assert.match(prompt, /Only render numeric measurements that are explicitly present in confirmed dimensions/)
+  assert.match(prompt, /包装盒：28 x 20 x 9 cm/)
+}
+
+function testNonMainPromptDoesNotAddSpecificParts() {
+  const prompt = buildAmazonPrompt(
+    { productName: 'Test product', productBlueprint: { identity: { productType: 'Test product' } } },
+    {
+      taskType: 'feature',
+      strategyContent: '展示产品真实使用方式。',
+      promptEn: 'Show the product in its real use context.',
+      currentImageProductUsage: { displayMode: 'single_item' }
+    },
+    'L2',
+    '2048x2048',
+    '/uploads/main.png',
+    [{ index: 1, role: 'primary_product' }, { index: 2, role: 'layout_style_reference' }]
+  )
+
+  assert.match(prompt, /layout or style reference only/)
+  assert.doesNotMatch(prompt, /controller, cable, clamp, base/)
 }
 
 await testMainImageNormalization()
 testScenarioUsageContract()
+testGeneratedImageSizeContract()
+testStrategyContractAndInputDeduplication()
+testExecutionRulesRemainVisibleWhenTheyReinforceStrategy()
+testEnglishExecutionRulesUseChineseFallback()
+testExecutionRulesKeepModelSpecificQuantityAndContactRules()
+testExplicitBundleItemsAndDimensionsWin()
+testCurrentImageUsageDoesNotInventBundleExclusions()
+testConfirmedDimensionsProtectGeneration()
+testNonMainPromptDoesNotAddSpecificParts()
 console.log('generation pipeline tests passed')

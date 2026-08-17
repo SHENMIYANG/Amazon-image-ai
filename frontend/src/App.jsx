@@ -5,7 +5,6 @@ import TaskGrid from './components/TaskGrid'
 import GenerateButton from './components/GenerateButton'
 import ResolutionSelector from './components/ResolutionSelector'
 import SettingsModal from './components/SettingsModal'
-import SettingsButton from './components/SettingsButton'
 import AgentAnalyzer from './components/AgentAnalyzer'
 import WorkspaceChatButton from './components/WorkspaceChatButton'
 import WorkspaceChatModal from './components/WorkspaceChatModal'
@@ -21,7 +20,8 @@ import {
   buildDefaultPlansFromTasks,
   getDefaultImageTaskConfig,
   getSelectedImageTaskCount,
-  MAIN_IMAGE_FIXED_RULE
+  MAIN_IMAGE_FIXED_RULE,
+  normalizeImagePlan
 } from './utils/imageTasks'
 import './App.css'
 
@@ -148,10 +148,50 @@ function buildImageVersionSnapshot(image = {}) {
     promptEn: image.promptEn || '',
     promptUsed: image.promptUsed || image.executionPromptEn || image.prompt || '',
     executionPromptEn: image.executionPromptEn || image.promptUsed || image.prompt || '',
+    executionRules: image.executionRules || [],
+    currentImageProductUsage: image.currentImageProductUsage || {},
+    copy: image.copy || [],
     actualResolution: image.actualResolution || null,
     requestedResolution: image.requestedResolution || null,
     sizeMatchesRequest: image.sizeMatchesRequest,
     savedAt: new Date().toISOString()
+  }
+}
+
+function buildCompletedImageState(image = {}, generatedImage = {}, fallbackPlan = {}) {
+  const executionPlan = normalizeImagePlan({
+    ...image,
+    ...fallbackPlan,
+    strategyContent: generatedImage.promptZh || fallbackPlan.strategyContent || image.strategyContent,
+    promptEn: generatedImage.promptEn || generatedImage.prompt || fallbackPlan.promptEn || image.promptEn,
+    executionRules: generatedImage.executionRules || fallbackPlan.executionRules || image.executionRules,
+    currentImageProductUsage:
+      generatedImage.currentImageProductUsage || fallbackPlan.currentImageProductUsage || image.currentImageProductUsage,
+    copy: generatedImage.copy || fallbackPlan.copy || image.copy
+  })
+
+  return {
+    ...image,
+    status: 'completed',
+    imageUrl: generatedImage.imageUrl,
+    name: generatedImage.name || image.name,
+    taskType: generatedImage.taskType || image.taskType,
+    imageRole: generatedImage.imageRole || executionPlan.imageRole,
+    sellingFocus: generatedImage.sellingFocus || executionPlan.sellingFocus,
+    currentImageProductUsage: executionPlan.currentImageProductUsage,
+    executionRules: executionPlan.executionRules,
+    copy: executionPlan.copy,
+    error: null,
+    strategyContent: executionPlan.strategyContent,
+    promptEn: executionPlan.promptEn || null,
+    promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || image.promptUsed || '',
+    executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || image.executionPromptEn || '',
+    prompt: generatedImage.prompt || generatedImage.executionPromptEn || image.prompt || '',
+    promptDirty: false,
+    regenerationError: null,
+    actualResolution: generatedImage.actualResolution || null,
+    requestedResolution: generatedImage.resolution || image.requestedResolution,
+    sizeMatchesRequest: generatedImage.sizeMatchesRequest
   }
 }
 
@@ -188,6 +228,28 @@ function isTaskConfigReductionOnly(previousConfig = {}, nextConfig = {}) {
   const next = normalizeTaskConfigForComparison(nextConfig)
 
   return Object.keys(prev).every((key) => next[key] <= prev[key])
+}
+
+function validateAnalyzedPlans(imagePlans = [], selectedImageTasks = {}) {
+  const expectedTaskKeys = buildDefaultPlansFromTasks(selectedImageTasks, [])
+    .map((plan) => plan.taskKey)
+  const actualTaskKeys = (Array.isArray(imagePlans) ? imagePlans : [])
+    .map((plan) => String(plan?.taskKey || '').trim())
+
+  const duplicateTaskKeys = actualTaskKeys.filter(
+    (taskKey, index) => taskKey && actualTaskKeys.indexOf(taskKey) !== index
+  )
+  const missingTaskKeys = expectedTaskKeys.filter((taskKey) => !actualTaskKeys.includes(taskKey))
+  const unexpectedTaskKeys = actualTaskKeys.filter((taskKey) => !expectedTaskKeys.includes(taskKey))
+
+  if (duplicateTaskKeys.length || missingTaskKeys.length || unexpectedTaskKeys.length) {
+    const details = [
+      duplicateTaskKeys.length ? `重复：${[...new Set(duplicateTaskKeys)].join('、')}` : '',
+      missingTaskKeys.length ? `缺少：${missingTaskKeys.join('、')}` : '',
+      unexpectedTaskKeys.length ? `多余：${[...new Set(unexpectedTaskKeys)].join('、')}` : ''
+    ].filter(Boolean).join('；')
+    throw new Error(`策略任务数据异常（${details}）。本次结果未写入页面，请重新生成策略。`)
+  }
 }
 
 const ANALYSIS_INVALIDATING_FIELDS = new Set([
@@ -346,15 +408,16 @@ function App() {
 
   const handleAgentAnalyzeComplete = (analysisResult) => {
     const { imagePlans, _meta, globalRules, globalConstraints, productBlueprint } = analysisResult
-    const normalizedPlans = (imagePlans || []).map((plan) => ({
+    validateAnalyzedPlans(imagePlans, listing.selectedImageTasks)
+    const normalizedPlans = (imagePlans || []).map((plan) => normalizeImagePlan({
       ...plan,
       strategyContent:
         (plan.taskType || plan.type) === 'main'
           ? MAIN_IMAGE_FIXED_RULE
           : plan.strategyContent || '',
       imageRole: plan.imageRole || '',
-      sellingFocus: plan.sellingFocus || plan.primarySellingPoint || '',
-      executionRules: plan.executionRules || plan.constraints || [],
+      sellingFocus: plan.sellingFocus || '',
+      executionRules: plan.executionRules || [],
       promptEn: plan.promptEn || '',
       promptDirty: false
     }))
@@ -370,16 +433,16 @@ function App() {
     
   }
 
-  const syncStrategyTranslations = async (plansOverride = null, targetPlanIds = null) => {
+  const syncStrategyTranslations = async (plansOverride = null, targetPlanTaskKeys = null) => {
     const plans = Array.isArray(plansOverride)
       ? plansOverride
       : buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
-    const targetIdSet = Array.isArray(targetPlanIds) && targetPlanIds.length > 0
-      ? new Set(targetPlanIds)
+    const targetTaskKeySet = Array.isArray(targetPlanTaskKeys) && targetPlanTaskKeys.length > 0
+      ? new Set(targetPlanTaskKeys)
       : null
     const dirtyPlans = plans.filter(
       (plan) =>
-        (!targetIdSet || targetIdSet.has(plan.id)) &&
+        (!targetTaskKeySet || targetTaskKeySet.has(plan.taskKey)) &&
         plan.taskType !== 'main' &&
         String(plan.strategyContent || '').trim() &&
         (plan.promptDirty || !String(plan.promptEn || '').trim())
@@ -390,14 +453,14 @@ function App() {
     }
 
     const savingMap = dirtyPlans.reduce((acc, plan) => {
-      acc[plan.id] = true
+      acc[plan.taskKey] = true
       return acc
     }, {})
     setSavingStrategyTranslations((prev) => ({ ...prev, ...savingMap }))
 
     try {
       const listingSnapshot = buildListingPayload(listing, { includeGenerationSettings: true })
-      const translatedById = new Map()
+      const translatedByTaskKey = new Map()
 
       for (const plan of dirtyPlans) {
         const response = await fetch('/api/prompt-preview', {
@@ -406,19 +469,27 @@ function App() {
           body: JSON.stringify({
             listing: listingSnapshot,
             plan,
-            resolution: selectedResolution === '4k' ? '4096x4096' : '2048x2048'
+            resolution: selectedResolution === '4k' ? '4096x4096' : '2048x2048',
+            persistence: {
+              workspaceId: listing._meta?.persistence?.workspaceId,
+              imagePlanId: plan.databasePlanId
+            }
           })
         })
 
         const data = await parseApiJson(response, `策略英文执行稿接口（图${plan.id}）`)
-        translatedById.set(plan.id, data.data?.promptEn || '')
+        translatedByTaskKey.set(plan.taskKey, {
+          promptEn: data.data?.promptEn || '',
+          databasePlanVersionId: data.data?.persistence?.imagePlanVersionId || plan.databasePlanVersionId
+        })
       }
 
       const nextPlans = plans.map((plan) =>
-        translatedById.has(plan.id)
+        translatedByTaskKey.has(plan.taskKey)
           ? {
               ...plan,
-              promptEn: translatedById.get(plan.id),
+              promptEn: translatedByTaskKey.get(plan.taskKey).promptEn,
+              databasePlanVersionId: translatedByTaskKey.get(plan.taskKey).databasePlanVersionId,
               promptDirty: false
             }
           : plan
@@ -426,7 +497,23 @@ function App() {
 
       setListing((prev) => ({
         ...prev,
-        imagePlans: nextPlans
+        imagePlans: (prev.imagePlans || []).map((currentPlan) => {
+          const translatedPlan = nextPlans.find((plan) => plan.taskKey === currentPlan.taskKey)
+          if (!translatedPlan || !translatedByTaskKey.has(currentPlan.taskKey)) return currentPlan
+
+          const contentChangedDuringSave =
+            String(currentPlan.strategyContent || '').trim() !==
+            String(translatedPlan.strategyContent || '').trim()
+
+          return {
+            ...currentPlan,
+            promptEn: contentChangedDuringSave ? '' : translatedPlan.promptEn,
+            databasePlanVersionId: contentChangedDuringSave
+              ? currentPlan.databasePlanVersionId
+              : translatedPlan.databasePlanVersionId,
+            promptDirty: contentChangedDuringSave
+          }
+        })
       }))
 
       return nextPlans
@@ -437,7 +524,7 @@ function App() {
       setSavingStrategyTranslations((prev) => {
         const next = { ...prev }
         dirtyPlans.forEach((plan) => {
-          delete next[plan.id]
+          delete next[plan.taskKey]
         })
         return next
       })
@@ -484,25 +571,29 @@ function App() {
     const newTask = {
       id: taskId,
       status: 'generating',
-      images: allPlans.map(plan => ({
-        imageId: plan.id,
-        name: plan.name,
-        taskType: plan.taskType,
+      images: allPlans.map(plan => {
+        const normalizedPlan = normalizeImagePlan(plan)
+        return {
+        imageId: normalizedPlan.id,
+        name: normalizedPlan.name,
+        taskType: normalizedPlan.taskType,
         status: 'pending',
         imageUrl: null,
-        imageRole: plan.imageRole || '',
-        sellingFocus: plan.sellingFocus || plan.primarySellingPoint || '',
-        executionRules: plan.executionRules || plan.constraints || [],
-        copy: plan.copy || [],
-        strategyContent: plan.strategyContent || '',
-        promptEn: plan.promptEn || '',
-        promptDirty: plan.promptDirty || false,
+        imageRole: normalizedPlan.imageRole,
+        sellingFocus: normalizedPlan.sellingFocus,
+        currentImageProductUsage: normalizedPlan.currentImageProductUsage,
+        executionRules: normalizedPlan.executionRules,
+        copy: normalizedPlan.copy,
+        strategyContent: normalizedPlan.strategyContent,
+        promptEn: normalizedPlan.promptEn,
+        promptDirty: normalizedPlan.promptDirty,
         versions: [],
         regenerationError: null,
         error: null,
         actualResolution: null,
         requestedResolution: selectedResolution === '4k' ? '4096x4096' : '2048x2048'
-      })),
+      }
+      }),
       listing: listingSnapshot,
       resolution: selectedResolution,
       createdAt: new Date().toISOString()
@@ -582,28 +673,8 @@ function App() {
                 return {
                   ...task,
                   images: task.images.map(img => 
-                    img.imageId === plan.id 
-                      ? { 
-                          ...img, 
-                          status: 'completed', 
-                          imageUrl: generatedImage.imageUrl,
-                          name: generatedImage.name || img.name,
-                          taskType: generatedImage.taskType || img.taskType,
-                          imageRole: generatedImage.imageRole || img.imageRole || '',
-                          sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
-                          error: null,
-                          strategyContent: generatedImage.promptZh || img.strategyContent || '',
-                          promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
-                          promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
-                          executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
-                          prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
-                          promptDirty: false,
-                          versions: img.versions || [],
-                          regenerationError: null,
-                          actualResolution: generatedImage.actualResolution || null,
-                          requestedResolution: generatedImage.resolution || img.requestedResolution,
-                          sizeMatchesRequest: generatedImage.sizeMatchesRequest
-                        } 
+                    img.imageId === plan.id
+                      ? { ...buildCompletedImageState(img, generatedImage, plan), versions: img.versions || [] }
                       : img
                   )
                 }
@@ -685,20 +756,20 @@ function App() {
     const providedPromptEn = String(options.promptEn || '').trim()
     const strategyChanged = requestedPrompt !== String(image.strategyContent || '').trim()
     
-    const planToUse = {
+    const planToUse = normalizeImagePlan({
       id: image.imageId,
       name: image.name,
       type: image.taskType,
       taskType: image.taskType,
       imageRole: image.imageRole || '',
-      sellingFocus: image.sellingFocus || image.primarySellingPoint || '',
-      executionRules: providedExecutionRules || image.executionRules || image.constraints || [],
+      sellingFocus: image.sellingFocus || '',
+      executionRules: providedExecutionRules || image.executionRules || [],
       copy: image.copy || [],
       strategyContent: requestedPrompt,
       promptEn: providedPromptEn || (strategyChanged ? '' : image.promptEn),
       promptDirty: providedPromptEn ? false : strategyChanged,
       regenerationMode: true
-    }
+    })
     
     if (!planToUse.strategyContent || planToUse.strategyContent.trim() === '') {
       alert('这张图片没有可用的策略内容')
@@ -754,7 +825,10 @@ function App() {
         resolution: task.resolution || selectedResolution,
         referenceImages: regenerationReferenceImages,
         primaryReferenceImageUrl,
-        regenerationReferenceImages: additionalReferenceImages,
+        regenerationReferenceImages: [
+          ...providedReferenceImageUrls,
+          ...additionalReferenceImages
+        ],
         label: `图片生成接口（图${image.imageId}）`
       })
 
@@ -768,23 +842,9 @@ function App() {
                     ? [previousVersion, ...(Array.isArray(img.versions) ? img.versions : [])].slice(0, 8)
                     : (img.versions || [])
 
-                  return { 
-                    ...img, 
-                      status: 'completed', 
-                      imageUrl: generatedImage.imageUrl,
-                    name: generatedImage.name || img.name,
-                    taskType: generatedImage.taskType || img.taskType,
-                    imageRole: generatedImage.imageRole || img.imageRole || '',
-                    sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
-                    error: null,
-                    strategyContent: generatedImage.promptZh || requestedPrompt,
-                    promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
-                    promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
-                    executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
-                    prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
-                    promptDirty: false,
+                  return {
+                    ...buildCompletedImageState(img, generatedImage, planToUse),
                     versions: nextVersions,
-                    regenerationError: null,
                     lastRegeneration: {
                       strategy: requestedPrompt,
                       complexity: requestedComplexity,
@@ -792,10 +852,7 @@ function App() {
                       addedReferenceCount: additionalReferenceImages.length + providedReferenceImageUrls.length,
                       usedReferenceCount: regenerationReferenceImages.length,
                       generatedAt: new Date().toISOString()
-                    },
-                    actualResolution: generatedImage.actualResolution || null,
-                    requestedResolution: generatedImage.resolution || img.requestedResolution,
-                    sizeMatchesRequest: generatedImage.sizeMatchesRequest
+                    }
                   }
                 }
                 return img
@@ -859,14 +916,14 @@ function App() {
     
     const pendingPlans = task.images
       .filter(img => img.status !== 'completed')
-      .map(img => ({
+      .map(img => normalizeImagePlan({
         id: img.imageId,
         name: img.name,
         type: img.taskType,
         taskType: img.taskType,
         imageRole: img.imageRole || '',
-        sellingFocus: img.sellingFocus || img.primarySellingPoint || '',
-        executionRules: img.executionRules || img.constraints || [],
+        sellingFocus: img.sellingFocus || '',
+        executionRules: img.executionRules || [],
         copy: img.copy || [],
         strategyContent: img.strategyContent || '',
         promptEn: img.promptEn,
@@ -934,27 +991,9 @@ function App() {
               return {
                 ...t,
                 images: t.images.map(img => 
-                  img.imageId === plan.id ? { 
-                    ...img, 
-                    status: 'completed', 
-                    imageUrl: generatedImage.imageUrl,
-                    name: generatedImage.name || img.name,
-                    taskType: generatedImage.taskType || img.taskType,
-                    imageRole: generatedImage.imageRole || img.imageRole || '',
-                    sellingFocus: generatedImage.sellingFocus || img.sellingFocus || img.primarySellingPoint || '',
-                    error: null,
-                    strategyContent: generatedImage.promptZh || img.strategyContent || '',
-                    promptEn: generatedImage.promptEn || generatedImage.prompt || img.promptEn || null,
-                    promptUsed: generatedImage.executionPromptEn || generatedImage.prompt || img.promptUsed || '',
-                    executionPromptEn: generatedImage.executionPromptEn || generatedImage.prompt || img.executionPromptEn || '',
-                    prompt: generatedImage.prompt || generatedImage.executionPromptEn || img.prompt || '',
-                    promptDirty: false,
-                    versions: img.versions || [],
-                    regenerationError: null,
-                    actualResolution: generatedImage.actualResolution || null,
-                    requestedResolution: generatedImage.resolution || img.requestedResolution,
-                    sizeMatchesRequest: generatedImage.sizeMatchesRequest
-                  } : img
+                  img.imageId === plan.id
+                    ? { ...buildCompletedImageState(img, generatedImage, plan), versions: img.versions || [] }
+                    : img
                 )
               }
             }
@@ -1000,9 +1039,13 @@ function App() {
     setCurrentTaskId(null)
   }
 
-  const handleSaveStrategyTranslationForPlan = async (planId) => {
-    const plans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
-    await syncStrategyTranslations(plans, [planId])
+  const handleSaveStrategyTranslationForPlan = async (taskKey, planSnapshot) => {
+    const currentPlans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
+    const snapshot = planSnapshot || currentPlans.find((plan) => plan.taskKey === taskKey)
+    if (!snapshot) return
+
+    const plans = currentPlans.map((plan) => (plan.taskKey === taskKey ? { ...plan, ...snapshot } : plan))
+    await syncStrategyTranslations(plans, [taskKey])
   }
 
   const handleDownload = async (imageUrl, filename, requestedResolution) => {
@@ -1074,7 +1117,6 @@ function App() {
         <span className="subtitle">Amazon Image Generator - Powered by GPT-Image-2</span>
       </header>
 
-      <SettingsButton onClick={() => setIsSettingsOpen(true)} />
       <WorkspaceChatButton onClick={() => setIsWorkspaceChatOpen(true)} />
 
       <main className="main">
