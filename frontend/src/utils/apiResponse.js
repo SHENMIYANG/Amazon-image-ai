@@ -96,6 +96,9 @@ export async function parseApiJson(response, label) {
     error.status = response.status
     error.emptyResponse = !String(rawText || '').trim()
     error.responseData = data
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    }
     throw error
   }
 

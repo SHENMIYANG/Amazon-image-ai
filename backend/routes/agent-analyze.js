@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import OpenAI from 'openai'
 import { getMarketplaceLanguage } from '../utils/productModel.js'
-import { readUploadFileBufferWithRetry, resolveUploadPathFromUrl } from '../utils/uploads.js'
+import { getAssetReferenceFromUrl, readAssetUrlBuffer } from '../services/storage.js'
 import {
   buildProductSignals as buildAgentProductSignals,
   normalizeProductBlueprint as normalizeAgentProductBlueprint
@@ -251,8 +251,8 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
   })
 
   for (const [index, imageUrl] of orderedReferenceImages.slice(0, 8).entries()) {
-    const imagePath = resolveUploadPathFromUrl(imageUrl)
-    if (!imagePath || !fs.existsSync(imagePath)) continue
+    const reference = getAssetReferenceFromUrl(imageUrl)
+    if (!reference) continue
 
     const role = imageUrl === primaryReferenceImageUrl
       ? 'primary_product'
@@ -262,13 +262,10 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
       text: `Reference image ${index + 1} is ${getReferenceRoleLabel(role)}.`
     })
 
-    const ext = path.extname(imagePath).toLowerCase()
+    const ext = path.extname(reference.objectKey).toLowerCase()
     const mimeType =
       ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
-    const fileBuffer = await readUploadFileBufferWithRetry(imagePath, {
-      attempts: 4,
-      delayMs: 220
-    })
+    const fileBuffer = await readAssetUrlBuffer(imageUrl)
 
     contentParts.push({
       type: 'image_url',
@@ -597,8 +594,16 @@ router.post('/', async (req, res) => {
       output: responseData,
       requestId,
       model,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      actor: req.auth
     })
+
+    if (req.auth && !persistence) {
+      return res.status(500).json({
+        error: 'Persistence failed',
+        message: '策略已生成，但工作区记录保存失败。请检查数据库后重试。'
+      })
+    }
 
     if (persistence) {
       const planIdsByTaskKey = new Map(

@@ -13,7 +13,7 @@ import {
 } from '../utils/productModel.js'
 import { postJsonWithRetry } from '../utils/upstreamRetry.js'
 import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
-import { ensureUploadsDir, resolveUploadPathFromUrl } from '../utils/uploads.js'
+import { materializeAssetUrls, writeAsset } from '../services/storage.js'
 import { persistGenerationResult } from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
@@ -30,6 +30,7 @@ function getMaxReferenceImages() {
 router.post('/', async (req, res) => {
   const generationRequestId = `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
   const startedAt = Date.now()
+  let cleanupReferenceFiles = async () => {}
   try {
     const {
       listing,
@@ -137,7 +138,9 @@ router.post('/', async (req, res) => {
         .sort((left, right) => referencePriority(left) - referencePriority(right))
         .slice(0, getMaxReferenceImages())
 
-      refImagePaths = orderedReferenceImages.map((imageUrl) => resolveUploadPathFromUrl(imageUrl))
+      const materializedReferences = await materializeAssetUrls(orderedReferenceImages)
+      refImagePaths = materializedReferences.paths
+      cleanupReferenceFiles = materializedReferences.cleanup
       orderedReferenceRoles = orderedReferenceImages.map((imageUrl, index) => ({
         index: index + 1,
         role: roleByUrl.get(imageUrl) || (imageUrl === explicitPrimaryReferenceImageUrl ? 'primary_product' : 'supporting_product')
@@ -244,8 +247,16 @@ router.post('/', async (req, res) => {
       images: generatedImages,
       model,
       requestId: generationRequestId,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      actor: req.auth
     })
+
+    if (req.auth && !persistence) {
+      return res.status(500).json({
+        error: 'Persistence failed',
+        message: '图片已生成，但生成记录保存失败。请检查数据库后重试。'
+      })
+    }
 
     res.json({
       success: true,
@@ -267,6 +278,8 @@ router.post('/', async (req, res) => {
         message: error.message
       })
     }
+  } finally {
+    await cleanupReferenceFiles()
   }
 })
 
@@ -350,11 +363,10 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
   const dimensions = readImageDimensions(imageBuffer)
   assertGeneratedImageDimensions(dimensions, size)
   const outputFilename = 'generated-' + Date.now() + '-' + Math.round(Math.random() * 1e9) + '.png'
-  const outputPath = path.join(ensureUploadsDir(), outputFilename)
-  fs.writeFileSync(outputPath, imageBuffer)
+  const stored = await writeAsset({ objectKey: `generated/${outputFilename}`, body: imageBuffer, contentType: 'image/png' })
 
   return {
-    imageUrl: '/uploads/' + outputFilename,
+    imageUrl: stored.url,
     width: dimensions.width,
     height: dimensions.height
   }

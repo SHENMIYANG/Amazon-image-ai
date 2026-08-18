@@ -1,20 +1,11 @@
 import express from 'express'
 import multer from 'multer'
 import path from 'path'
-import { ensureUploadsDir } from '../utils/uploads.js'
+import { createUploadedAsset } from '../services/persistence/workbenchRepository.js'
+import { writeAsset } from '../services/storage.js'
 
 const router = express.Router()
 const MAX_UPLOAD_FILES = 8
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, ensureUploadsDir())
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9)
-    cb(null, uniqueSuffix + path.extname(file.originalname))
-  }
-})
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|gif|webp/
@@ -29,7 +20,7 @@ const fileFilter = (req, file, cb) => {
 }
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024,
     files: MAX_UPLOAD_FILES
@@ -37,7 +28,7 @@ const upload = multer({
   fileFilter
 })
 
-router.post('/', upload.array('images', MAX_UPLOAD_FILES), (req, res) => {
+router.post('/', upload.array('images', MAX_UPLOAD_FILES), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -46,17 +37,32 @@ router.post('/', upload.array('images', MAX_UPLOAD_FILES), (req, res) => {
       })
     }
 
-    const imageUrls = req.files.map((file) => `/uploads/${file.filename}`)
+    const images = await Promise.all(req.files.map(async (file) => {
+      const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`
+      const stored = await writeAsset({ objectKey: `temp/${filename}`, body: file.buffer, contentType: file.mimetype })
+      const asset = await createUploadedAsset({
+        ...stored,
+        mimeType: file.mimetype,
+        byteSize: file.size,
+        role: req.query?.kind === 'feedback' ? 'FEEDBACK_REFERENCE' : 'PRODUCT_REFERENCE',
+        actor: req.auth
+      })
+      const url = asset?.publicUrl || stored.url
+
+      return {
+        url,
+        filename,
+        size: file.size,
+        mimetype: file.mimetype,
+        assetId: asset?.id || null,
+        objectKey: stored.objectKey
+      }
+    }))
 
     res.json({
       success: true,
       count: req.files.length,
-      images: imageUrls.map((url, index) => ({
-        url,
-        filename: req.files[index].filename,
-        size: req.files[index].size,
-        mimetype: req.files[index].mimetype
-      }))
+      images
     })
   } catch (error) {
     console.error('Upload error:', error)

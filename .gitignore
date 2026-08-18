@@ -9,6 +9,7 @@ frontend/dist/
 backend/uploads/
 backend/logs/
 backend/test-output/
+frontend/test-results/
 backend/public/templates/
 
 # Test & debug files
@@ -38,3 +39,6 @@ Thumbs.db
 
 # Docker
 *.tar
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

@@ -35,8 +35,16 @@ router.post('/', async (req, res) => {
     const persistedVersion = await persistImagePlanVersion({
       workspaceId: persistence?.workspaceId,
       imagePlanId: persistence?.imagePlanId || plan?.databasePlanId,
-      plan: normalizedPlan
+      plan: normalizedPlan,
+      actor: req.auth
     })
+
+    if (req.auth && !persistedVersion) {
+      return res.status(500).json({
+        error: 'Persistence failed',
+        message: '英文执行稿已生成，但策略版本保存失败。请检查数据库后重试。'
+      })
+    }
 
     res.json({
       success: true,

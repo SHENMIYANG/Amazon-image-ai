@@ -11,7 +11,6 @@ enum MembershipRole {
   ADMIN
   OPERATOR
   DESIGNER
-  VIEWER
 }
 
 enum AssetRole {
@@ -59,12 +58,15 @@ model Organization {
 
 model User {
   id                 String             @id @default(uuid()) @db.Uuid
-  email              String             @unique
+  loginName          String             @unique
+  email              String?            @unique
   displayName        String?
   passwordHash       String?
   isActive           Boolean            @default(true)
+  lastLoginAt        DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
+  sessions           AuthSession[]
   memberships        Membership[]
   createdWorkspaces  ProductWorkspace[] @relation("WorkspaceCreator")
   createdInputs      ProductInputVersion[] @relation("InputCreator")
@@ -74,6 +76,20 @@ model User {
   feedbackMessages   FeedbackMessage[]  @relation("FeedbackAuthor")
   modelRequests      ModelRequest[]     @relation("ModelRequestActor")
   auditEvents        AuditEvent[]       @relation("AuditActor")
+}
+
+model AuthSession {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  tokenHash          String   @unique
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  lastSeenAt         DateTime?
+  createdAt          DateTime @default(now())
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
 }
 
 model Membership {
@@ -112,8 +128,9 @@ model ProductWorkspace {
   modelRequests      ModelRequest[]
   auditEvents        AuditEvent[]
 
-  @@unique([organizationId, sourceSystem, externalProductId])
+  @@unique([organizationId, createdById, sourceSystem, externalProductId], map: "product_workspace_owner_external_product_unique")
   @@index([organizationId, updatedAt])
+  @@index([organizationId, createdById, updatedAt])
 }
 
 model ProductInputVersion {

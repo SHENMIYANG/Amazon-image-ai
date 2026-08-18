@@ -426,6 +426,8 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
             prompt: revision.strategyContent,
             promptEn: revision.promptEn,
             executionRules: revision.executionRules,
+            databasePlanId: revision.databasePlanId || task.images?.[feedbackDialog.imageIndex]?.databasePlanId,
+            databasePlanVersionId: revision.databasePlanVersionId || task.images?.[feedbackDialog.imageIndex]?.databasePlanVersionId,
             referenceImageUrls: feedbackReferenceImages,
             complexity: task?.listing?.complexity || 'L2',
             suppressAlert: true,

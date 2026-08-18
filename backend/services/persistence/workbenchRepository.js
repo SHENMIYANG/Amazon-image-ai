@@ -1,5 +1,6 @@
 import path from 'path'
 import { getDatabaseClient, isPersistenceEnabled } from './client.js'
+import { buildAssetUrl, getAssetReferenceFromUrl, getStorageProvider } from '../storage.js'
 
 const DEFAULT_ORGANIZATION_SLUG = 'default'
 const DEFAULT_ORGANIZATION_NAME = 'Default Organization'
@@ -13,8 +14,12 @@ function getDefaultOrganizationSlug() {
     .replace(/^-|-$/g, '') || DEFAULT_ORGANIZATION_SLUG
 }
 
-function localObjectKey(url = '') {
-  return String(url || '').replace(/^\/?uploads\//, '').trim()
+function assetReference(url = '') {
+  return getAssetReferenceFromUrl(url)
+}
+
+function assetUrl(asset) {
+  return asset ? buildAssetUrl(asset.storageProvider, asset.objectKey) : ''
 }
 
 function toJson(value) {
@@ -33,11 +38,69 @@ async function getDefaultOrganization(db) {
   })
 }
 
-async function resolveWorkspace(db, organizationId, input = {}) {
+function canAccessAllWorkspaces(actor = null) {
+  return actor?.role === 'ADMIN'
+}
+
+function workspaceAccessScope(organizationId, actor = null) {
+  return {
+    organizationId,
+    deletedAt: null,
+    ...(actor?.userId && !canAccessAllWorkspaces(actor) ? { createdById: actor.userId } : {})
+  }
+}
+
+export async function createUploadedAsset({ storageProvider = getStorageProvider(), objectKey, mimeType = null, byteSize = null, role = 'PRODUCT_REFERENCE', actor = null }) {
+  if (!isPersistenceEnabled() || !actor?.organizationId || !actor?.userId || !objectKey) return null
+
+  const db = await getDatabaseClient()
+  if (!db) return null
+
+  const publicUrl = buildAssetUrl(storageProvider, objectKey)
+  return await db.asset.upsert({
+    where: { storageProvider_objectKey: { storageProvider, objectKey } },
+    update: { publicUrl, mimeType, byteSize, role, organizationId: actor.organizationId, createdById: actor.userId },
+    create: {
+      organizationId: actor.organizationId,
+      storageProvider,
+      objectKey,
+      publicUrl,
+      mimeType,
+      byteSize,
+      role,
+      createdById: actor.userId
+    }
+  })
+}
+
+export async function getAccessibleAsset({ storageProvider, objectKey, actor = null }) {
+  if (!isPersistenceEnabled() || !actor?.organizationId || !objectKey) return null
+
+  const db = await getDatabaseClient()
+  if (!db) return null
+
+  return await db.asset.findFirst({
+    where: {
+      organizationId: actor.organizationId,
+      storageProvider,
+      objectKey,
+      ...(canAccessAllWorkspaces(actor)
+        ? {}
+        : {
+            OR: [
+              { createdById: actor.userId },
+              { workspace: { createdById: actor.userId, deletedAt: null } }
+            ]
+          })
+    }
+  })
+}
+
+async function resolveWorkspace(db, organizationId, input = {}, actor = null) {
   const workspaceId = String(input.workspaceId || '').trim()
   if (workspaceId) {
     const workspace = await db.productWorkspace.findFirst({
-      where: { id: workspaceId, organizationId, deletedAt: null }
+      where: { id: workspaceId, ...workspaceAccessScope(organizationId, actor) }
     })
     if (workspace) return workspace
   }
@@ -47,25 +110,33 @@ async function resolveWorkspace(db, organizationId, input = {}) {
   const title = String(input.productName || '').trim() || null
 
   if (sourceSystem && externalProductId) {
-    return await db.productWorkspace.upsert({
+    const workspace = await db.productWorkspace.findFirst({
       where: {
-        organizationId_sourceSystem_externalProductId: {
-          organizationId,
-          sourceSystem,
-          externalProductId
-        }
-      },
-      update: { title, status: 'ACTIVE', deletedAt: null },
-      create: { organizationId, sourceSystem, externalProductId, title }
+        ...workspaceAccessScope(organizationId, actor),
+        sourceSystem,
+        externalProductId
+      }
     })
+    if (workspace) {
+      return await db.productWorkspace.update({
+        where: { id: workspace.id },
+        data: { title, status: 'ACTIVE', deletedAt: null }
+      })
+    }
   }
 
   return await db.productWorkspace.create({
-    data: { organizationId, title }
+    data: {
+      organizationId,
+      sourceSystem,
+      externalProductId,
+      title,
+      createdById: actor?.userId || null
+    }
   })
 }
 
-async function createInputVersion(db, workspaceId, input, productBlueprint = null) {
+async function createInputVersion(db, workspaceId, input, productBlueprint = null, createdById = null) {
   const previous = await db.productInputVersion.findFirst({
     where: { workspaceId },
     orderBy: { version: 'desc' },
@@ -77,12 +148,13 @@ async function createInputVersion(db, workspaceId, input, productBlueprint = nul
       workspaceId,
       version: (previous?.version || 0) + 1,
       inputSnapshot: toJson(input),
-      productBlueprint: toJson(productBlueprint)
+      productBlueprint: toJson(productBlueprint),
+      createdById
     }
   })
 }
 
-async function upsertReferenceAssets(db, { organizationId, workspaceId, inputVersionId, input }) {
+async function upsertReferenceAssets(db, { organizationId, workspaceId, inputVersionId, input, createdById = null }) {
   const urls = Array.isArray(input.referenceImages) ? input.referenceImages.filter(Boolean) : []
   const primaryUrl = String(input.primaryReferenceImageUrl || urls[0] || '')
   const roleByUrl = new Map(
@@ -100,20 +172,21 @@ async function upsertReferenceAssets(db, { organizationId, workspaceId, inputVer
 
   const assetIds = []
   for (const [sortOrder, url] of urls.entries()) {
-    const objectKey = localObjectKey(url)
-    if (!objectKey) continue
+    const reference = assetReference(url)
+    if (!reference) continue
 
     const asset = await db.asset.upsert({
-      where: { storageProvider_objectKey: { storageProvider: 'local', objectKey } },
-      update: { publicUrl: url, workspaceId, organizationId },
+      where: { storageProvider_objectKey: reference },
+      update: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey), workspaceId, organizationId },
       create: {
         organizationId,
         workspaceId,
-        storageProvider: 'local',
-        objectKey,
-        publicUrl: url,
-        mimeType: getMimeType(objectKey),
-        role: 'PRODUCT_REFERENCE'
+        storageProvider: reference.storageProvider,
+        objectKey: reference.objectKey,
+        publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey),
+        mimeType: getMimeType(reference.objectKey),
+        role: 'PRODUCT_REFERENCE',
+        createdById
       }
     })
 
@@ -158,7 +231,7 @@ function mapPlanVersion(plan = {}) {
   }
 }
 
-export async function persistStrategyResult({ input, output, requestId, model, durationMs }) {
+export async function persistStrategyResult({ input, output, requestId, model, durationMs, actor = null }) {
   if (!isPersistenceEnabled()) return null
 
   try {
@@ -166,14 +239,18 @@ export async function persistStrategyResult({ input, output, requestId, model, d
     if (!db) return null
 
     return await db.$transaction(async (tx) => {
-      const organization = await getDefaultOrganization(tx)
-      const workspace = await resolveWorkspace(tx, organization.id, input)
-      const inputVersion = await createInputVersion(tx, workspace.id, input, output.productBlueprint)
+      const organization = actor?.organizationId
+        ? await tx.organization.findUnique({ where: { id: actor.organizationId } })
+        : await getDefaultOrganization(tx)
+      if (!organization) return null
+      const workspace = await resolveWorkspace(tx, organization.id, input, actor)
+      const inputVersion = await createInputVersion(tx, workspace.id, input, output.productBlueprint, actor?.userId || null)
       const referenceAssetIds = await upsertReferenceAssets(tx, {
         organizationId: organization.id,
         workspaceId: workspace.id,
         inputVersionId: inputVersion.id,
-        input
+        input,
+        createdById: actor?.userId || null
       })
 
       const strategyRun = await tx.strategyRun.create({
@@ -205,7 +282,8 @@ export async function persistStrategyResult({ input, output, requestId, model, d
           data: {
             imagePlanId: imagePlan.id,
             version: 1,
-            ...mapPlanVersion(plan)
+            ...mapPlanVersion(plan),
+            createdById: actor?.userId || null
           }
         })
         persistedPlans.push({ taskKey: plan.taskKey, imagePlanId: imagePlan.id, imagePlanVersionId: version.id })
@@ -217,6 +295,7 @@ export async function persistStrategyResult({ input, output, requestId, model, d
           workspaceId: workspace.id,
           strategyRunId: strategyRun.id,
           type: 'STRATEGY',
+          actorId: actor?.userId || null,
           model: model || null,
           requestId,
           status: 'SUCCEEDED',
@@ -231,6 +310,7 @@ export async function persistStrategyResult({ input, output, requestId, model, d
           organizationId: organization.id,
           workspaceId: workspace.id,
           action: 'strategy.generated',
+          actorId: actor?.userId || null,
           entityType: 'strategy_run',
           entityId: strategyRun.id,
           metadata: { inputVersionId: inputVersion.id, referenceAssetIds, imagePlanCount: persistedPlans.length }
@@ -251,7 +331,7 @@ export async function persistStrategyResult({ input, output, requestId, model, d
   }
 }
 
-export async function persistImagePlanVersion({ workspaceId, imagePlanId, plan }) {
+export async function persistImagePlanVersion({ workspaceId, imagePlanId, plan, actor = null }) {
   if (!isPersistenceEnabled() || !workspaceId || !imagePlanId) return null
 
   try {
@@ -262,7 +342,12 @@ export async function persistImagePlanVersion({ workspaceId, imagePlanId, plan }
       const imagePlan = await tx.imagePlan.findFirst({
         where: {
           id: imagePlanId,
-          strategyRun: { workspaceId }
+          strategyRun: {
+            workspaceId,
+            workspace: actor?.organizationId
+              ? workspaceAccessScope(actor.organizationId, actor)
+              : undefined
+          }
         },
         select: { id: true }
       })
@@ -278,7 +363,8 @@ export async function persistImagePlanVersion({ workspaceId, imagePlanId, plan }
           imagePlanId,
           version: (previous?.version || 0) + 1,
           ...mapPlanVersion(plan),
-          source: 'OPERATOR'
+          source: 'OPERATOR',
+          createdById: actor?.userId || null
         }
       })
 
@@ -290,7 +376,205 @@ export async function persistImagePlanVersion({ workspaceId, imagePlanId, plan }
   }
 }
 
-export async function persistGenerationResult({ executionContext, images, model, requestId, durationMs }) {
+async function getFeedbackContext(db, { workspaceId, imagePlanId, actor = null }) {
+  const workspace = await db.productWorkspace.findFirst({
+    where: { id: workspaceId, ...workspaceAccessScope(actor?.organizationId, actor) },
+    select: { id: true, organizationId: true }
+  })
+  if (!workspace) {
+    const error = new Error('当前账号不能访问该工作区。')
+    error.statusCode = 404
+    throw error
+  }
+
+  const imagePlan = await db.imagePlan.findFirst({
+    where: { id: imagePlanId, strategyRun: { workspaceId } },
+    include: {
+      strategyRun: { select: { productBlueprint: true } },
+      versions: { orderBy: { version: 'desc' }, take: 1 },
+      generationRuns: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        include: { generatedImages: { orderBy: { createdAt: 'desc' }, take: 1, include: { asset: true } } }
+      }
+    }
+  })
+  if (!imagePlan) {
+    const error = new Error('图片计划不存在或不属于当前工作区。')
+    error.statusCode = 404
+    throw error
+  }
+
+  let thread = await db.feedbackThread.findFirst({
+    where: { workspaceId, imagePlanId },
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        include: { planVersion: true, attachments: { include: { asset: true } } }
+      }
+    }
+  })
+  if (!thread) {
+    thread = await db.feedbackThread.create({
+      data: { workspaceId, imagePlanId, generatedImageId: imagePlan.generationRuns[0]?.generatedImages[0]?.id || null },
+      include: {
+        messages: { include: { planVersion: true, attachments: { include: { asset: true } } } }
+      }
+    })
+  }
+
+  return { workspace, imagePlan, thread }
+}
+
+function serializeFeedbackThread({ imagePlan, thread }) {
+  const fallbackVersion = imagePlan.versions[0] || {}
+  const latestRevision = [...thread.messages]
+    .reverse()
+    .find((message) => message.planVersion)?.planVersion || fallbackVersion
+  const latestGeneratedImage = imagePlan.generationRuns[0]?.generatedImages[0] || null
+
+  return {
+    threadId: thread.id,
+    imagePlan: {
+      id: imagePlan.id,
+      name: imagePlan.name,
+      taskType: imagePlan.taskType,
+      imageRole: latestRevision.imageRole || '',
+      sellingFocus: latestRevision.sellingFocus || '',
+      strategyContent: latestRevision.strategyContent || '',
+      promptEn: latestRevision.promptEn || '',
+      executionRules: latestRevision.executionRules || [],
+      databasePlanId: imagePlan.id,
+      databasePlanVersionId: latestRevision.id || null
+    },
+    productBlueprint: imagePlan.strategyRun.productBlueprint || {},
+    generatedImage: latestGeneratedImage
+      ? {
+          id: latestGeneratedImage.id,
+          imageUrl: latestGeneratedImage.asset
+            ? assetUrl(latestGeneratedImage.asset)
+            : latestGeneratedImage.imageUrlSnapshot || ''
+        }
+      : null,
+    messages: thread.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      intent: message.intent || undefined,
+      createdAt: message.createdAt,
+      attachments: message.attachments.map((attachment) => ({
+        url: assetUrl(attachment.asset),
+        filename: attachment.asset?.objectKey?.split('/').pop() || '',
+        mimetype: attachment.asset?.mimeType || ''
+      })).filter((attachment) => attachment.url)
+    })),
+    revision: {
+      strategyContent: latestRevision.strategyContent || '',
+      promptEn: latestRevision.promptEn || '',
+      executionRules: latestRevision.executionRules || [],
+      databasePlanId: imagePlan.id,
+      databasePlanVersionId: latestRevision.id || null
+    }
+  }
+}
+
+export async function loadImageFeedbackThread({ workspaceId, imagePlanId, actor = null }) {
+  if (!isPersistenceEnabled()) {
+    const error = new Error('图片反馈记录需要 PostgreSQL。')
+    error.statusCode = 503
+    throw error
+  }
+
+  const db = await getDatabaseClient()
+  if (!db) throw new Error('图片反馈记录不可用。')
+  return serializeFeedbackThread(await getFeedbackContext(db, { workspaceId, imagePlanId, actor }))
+}
+
+export async function persistImageFeedbackExchange({ workspaceId, imagePlanId, userMessage, attachmentUrls = [], assistantContent, intent, revision, model, actor = null }) {
+  if (!isPersistenceEnabled()) {
+    const error = new Error('图片反馈记录需要 PostgreSQL。')
+    error.statusCode = 503
+    throw error
+  }
+
+  const db = await getDatabaseClient()
+  if (!db) throw new Error('图片反馈记录不可用。')
+
+  return await db.$transaction(async (tx) => {
+    const context = await getFeedbackContext(tx, { workspaceId, imagePlanId, actor })
+    const references = [...new Map(attachmentUrls.map(assetReference).filter(Boolean).map((item) => [`${item.storageProvider}:${item.objectKey}`, item])).values()]
+    const attachments = await Promise.all(references.map(async (reference) => await tx.asset.findFirst({
+      where: {
+        organizationId: context.workspace.organizationId,
+        ...reference,
+        ...(canAccessAllWorkspaces(actor)
+          ? {}
+          : { OR: [{ createdById: actor?.userId }, { workspace: { createdById: actor?.userId, deletedAt: null } }] })
+      }
+    })))
+    if (attachments.some((asset) => !asset)) {
+      const error = new Error('反馈参考图不存在或当前账号无权使用。')
+      error.statusCode = 403
+      throw error
+    }
+
+    const userRecord = await tx.feedbackMessage.create({
+      data: {
+        threadId: context.thread.id,
+        role: 'user',
+        content: userMessage,
+        createdById: actor?.userId || null,
+        attachments: {
+          create: attachments.map((asset) => ({ assetId: asset.id }))
+        }
+      }
+    })
+
+    const currentVersion = context.imagePlan.versions[0]
+    const nextVersion = await tx.imagePlanVersion.create({
+      data: {
+        imagePlanId,
+        version: (currentVersion?.version || 0) + 1,
+        imageRole: currentVersion?.imageRole || null,
+        sellingFocus: currentVersion?.sellingFocus || null,
+        strategyContent: revision.strategyContent || currentVersion?.strategyContent || '',
+        promptEn: revision.promptEn || currentVersion?.promptEn || '',
+        copy: currentVersion?.copy || null,
+        executionRules: toJson(revision.executionRules || currentVersion?.executionRules || []),
+        usage: currentVersion?.usage || null,
+        source: 'FEEDBACK',
+        createdById: actor?.userId || null
+      }
+    })
+
+    await tx.feedbackMessage.create({
+      data: {
+        threadId: context.thread.id,
+        role: 'assistant',
+        content: assistantContent,
+        intent,
+        planVersionId: nextVersion.id,
+        createdById: actor?.userId || null
+      }
+    })
+    await tx.auditEvent.create({
+      data: {
+        organizationId: context.workspace.organizationId,
+        workspaceId,
+        actorId: actor?.userId || null,
+        action: 'image.feedback',
+        entityType: 'feedback_thread',
+        entityId: context.thread.id,
+        metadata: { imagePlanId, userMessageId: userRecord.id, intent }
+      }
+    })
+
+    return serializeFeedbackThread(await getFeedbackContext(tx, { workspaceId, imagePlanId, actor }))
+  })
+}
+
+export async function persistGenerationResult({ executionContext, images, model, requestId, durationMs, actor = null }) {
   const persistence = executionContext?.persistence || {}
   const workspaceId = String(persistence.workspaceId || '').trim()
   const imagePlanId = String(persistence.imagePlanId || '').trim()
@@ -303,11 +587,25 @@ export async function persistGenerationResult({ executionContext, images, model,
     if (!db) return null
 
     return await db.$transaction(async (tx) => {
-      const workspace = await tx.productWorkspace.findUnique({
-        where: { id: workspaceId },
+      const workspace = await tx.productWorkspace.findFirst({
+        where: actor?.organizationId
+          ? { id: workspaceId, ...workspaceAccessScope(actor.organizationId, actor) }
+          : { id: workspaceId, deletedAt: null },
         select: { id: true, organizationId: true }
       })
       if (!workspace) return null
+
+      const imagePlan = await tx.imagePlan.findFirst({
+        where: { id: imagePlanId, strategyRun: { workspaceId } },
+        select: { id: true }
+      })
+      if (!imagePlan) return null
+
+      const imagePlanVersion = await tx.imagePlanVersion.findFirst({
+        where: { id: imagePlanVersionId, imagePlanId },
+        select: { id: true }
+      })
+      if (!imagePlanVersion) return null
 
       const completedImages = (Array.isArray(images) ? images : []).filter((image) => image?.status === 'completed')
       const generationRun = await tx.generationRun.create({
@@ -327,26 +625,28 @@ export async function persistGenerationResult({ executionContext, images, model,
           completedAt: new Date(),
           errorMessage: completedImages.length > 0
             ? null
-            : String((images || []).find((image) => image?.error)?.error || 'Image generation failed')
+            : String((images || []).find((image) => image?.error)?.error || 'Image generation failed'),
+          createdById: actor?.userId || null
         }
       })
 
       for (const image of completedImages) {
-        const objectKey = localObjectKey(image.imageUrl)
-        const asset = objectKey
+        const reference = assetReference(image.imageUrl)
+        const asset = reference
           ? await tx.asset.upsert({
-              where: { storageProvider_objectKey: { storageProvider: 'local', objectKey } },
-              update: { publicUrl: image.imageUrl, workspaceId, organizationId: workspace.organizationId },
+              where: { storageProvider_objectKey: reference },
+              update: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey), workspaceId, organizationId: workspace.organizationId },
               create: {
                 organizationId: workspace.organizationId,
                 workspaceId,
-                storageProvider: 'local',
-                objectKey,
-                publicUrl: image.imageUrl,
+                storageProvider: reference.storageProvider,
+                objectKey: reference.objectKey,
+                publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey),
                 mimeType: 'image/png',
                 width: image.actualWidth || image.width || null,
                 height: image.actualHeight || image.height || null,
-                role: 'GENERATED_IMAGE'
+                role: 'GENERATED_IMAGE',
+                createdById: actor?.userId || null
               }
             })
           : null
@@ -370,6 +670,7 @@ export async function persistGenerationResult({ executionContext, images, model,
           workspaceId,
           generationRunId: generationRun.id,
           type: 'IMAGE_GENERATION',
+          actorId: actor?.userId || null,
           model: model || null,
           requestId,
           status: generationRun.status,
@@ -386,6 +687,7 @@ export async function persistGenerationResult({ executionContext, images, model,
           organizationId: workspace.organizationId,
           workspaceId,
           action: 'image.generated',
+          actorId: actor?.userId || null,
           entityType: 'generation_run',
           entityId: generationRun.id,
           metadata: { imagePlanId, imagePlanVersionId, imageCount: completedImages.length }

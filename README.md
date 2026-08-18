@@ -168,12 +168,16 @@ AI 分析产品，生成 productBlueprint 和每张图的中文/英文策略
 │  └─ package.json
 ├─ backend/                      # Express 后端
 │  ├─ routes/
+│  │  ├─ auth.js                # 登录和退出
+│  │  ├─ members.js             # 成员与角色管理
 │  │  ├─ upload.js              # 图片上传
 │  │  ├─ agent-analyze.js       # 产品理解 + 策略生成
 │  │  ├─ prompt-preview.js      # 单张策略英文执行稿同步
 │  │  ├─ generate.js            # 生图执行
 │  │  └─ testApiKey.js          # 接口配置测试
 │  ├─ utils/
+│  ├─ services/auth/            # 密码、会话和权限
+│  ├─ prisma/                    # PostgreSQL 数据模型和迁移
 │  ├─ server.js
 │  └─ package.json
 ├─ docs/
@@ -283,6 +287,35 @@ JSON_BODY_LIMIT=4mb
 CORS_ORIGIN=
 UPLOAD_RETENTION_HOURS=24
 ```
+
+### 数据库与登录
+
+启用 PostgreSQL 后，工作台会要求登录。认证和业务数据使用同一个数据库。
+
+```env
+DATABASE_URL=postgresql://amazon_image:your_password@127.0.0.1:5432/amazon_image?schema=public
+AUTH_ENABLED=true
+AUTH_SESSION_DAYS=14
+BOOTSTRAP_ADMIN_LOGIN=admin
+BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
+BOOTSTRAP_ADMIN_NAME=Administrator
+BOOTSTRAP_ADMIN_EMAIL=
+```
+
+首次启用前执行：
+
+```bash
+cd backend
+npm run db:generate
+npm run db:migrate:deploy
+```
+
+初始管理员只会创建一次。之后从右上角“成员与权限”添加运营、美工和查看者。
+
+- 管理员：成员管理和全部工作台操作
+- 运营：上传、策略、生图、聊天和下载
+- 美工：全部工作台操作
+- 查看者：查看和下载
 
 ## 关键代码说明
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './ImageFeedbackChat.css'
 
 function buildInitialRevision(image) {
@@ -50,6 +50,10 @@ export default function ImageFeedbackChat({
   const [generating, setGenerating] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [restoring, setRestoring] = useState(false)
+
+  const workspaceId = task?.listing?._meta?.persistence?.workspaceId || ''
+  const imagePlanId = image?.databasePlanId || ''
 
   const messages = chatState?.messages?.length
     ? chatState.messages
@@ -63,7 +67,40 @@ export default function ImageFeedbackChat({
   const revision = chatState?.revision || buildInitialRevision(image)
   const attachments = Array.isArray(chatState?.attachments) ? chatState.attachments : []
 
+  useEffect(() => {
+    if (!workspaceId || !imagePlanId) return undefined
+    let active = true
+    setRestoring(true)
+
+    fetch(`/api/image-feedback/thread?workspaceId=${encodeURIComponent(workspaceId)}&imagePlanId=${encodeURIComponent(imagePlanId)}`)
+      .then((response) => response.json().then((data) => ({ response, data })))
+      .then(({ response, data }) => {
+        if (!active) return
+        if (!response.ok || !data?.success) throw new Error(data?.message || `HTTP ${response.status}`)
+        const thread = data.data || {}
+        const restoredAttachments = (thread.messages || [])
+          .flatMap((message) => message.attachments || [])
+          .filter((item, index, source) => item?.url && source.findIndex((candidate) => candidate.url === item.url) === index)
+        onChange?.({
+          messages: thread.messages || [],
+          revision: thread.revision || buildInitialRevision(image),
+          attachments: restoredAttachments,
+          updatedAt: new Date().toISOString()
+        })
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError.message || '图片反馈记录读取失败')
+      })
+      .finally(() => {
+        if (active) setRestoring(false)
+      })
+
+    return () => { active = false }
+  }, [workspaceId, imagePlanId])
+
   const contextPayload = useMemo(() => ({
+    workspaceId,
+    imagePlanId,
     productBlueprint: task?.listing?.productBlueprint || task?.listing?.productTruth || {},
     imagePlan: {
       id: image?.imageId,
@@ -89,7 +126,7 @@ export default function ImageFeedbackChat({
     currentRevision: revision,
     feedbackReferenceImages: attachments.map((item) => item.url).filter(Boolean),
     complexity: task?.listing?.complexity || 'L2'
-  }), [task, image, revision, attachments])
+  }), [task, image, revision, attachments, workspaceId, imagePlanId])
 
   const updateChatState = (nextState) => {
     onChange?.({
@@ -126,7 +163,7 @@ export default function ImageFeedbackChat({
       const formData = new FormData()
       files.forEach((file) => formData.append('images', file))
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/api/upload?kind=feedback', {
         method: 'POST',
         body: formData
       })
@@ -197,11 +234,18 @@ export default function ImageFeedbackChat({
         shouldGenerate ? '\n我会按这份最新修图指令重新生成当前这张图。' : ''
       ].filter(Boolean).join('\n')
 
-      let currentMessages = appendAndSave(nextMessages, {
-        role: 'assistant',
-        content: assistantContent,
-        intent: result.intent
-      }, nextRevision)
+      const persistedThread = result.thread || {}
+      const persistedAttachments = (persistedThread.messages || [])
+        .flatMap((message) => message.attachments || [])
+        .filter((item, index, source) => item?.url && source.findIndex((candidate) => candidate.url === item.url) === index)
+      let currentMessages = persistedThread.messages?.length
+        ? persistedThread.messages
+        : appendAndSave(nextMessages, { role: 'assistant', content: assistantContent, intent: result.intent }, nextRevision)
+      updateChatState({
+        messages: currentMessages,
+        revision: nextRevision,
+        attachments: persistedAttachments.length ? persistedAttachments : attachments
+      })
 
       if (shouldGenerate) {
         if (!onRegenerate) {
@@ -342,7 +386,7 @@ export default function ImageFeedbackChat({
                   placeholder="告诉 AI 这张图哪里不对，或直接说“按这个生成”。"
                   rows={3}
                 />
-                <button type="button" onClick={sendMessage} disabled={loading || generating || uploading || !input.trim()}>
+                <button type="button" onClick={sendMessage} disabled={loading || generating || uploading || restoring || !input.trim()}>
                   {mayBeGenerateIntent(input) ? '发送并执行' : '发送'}
                 </button>
               </div>

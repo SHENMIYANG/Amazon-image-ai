@@ -6,25 +6,40 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export const UPLOADS_DIR = path.join(__dirname, '..', 'uploads')
+export const TEMP_UPLOADS_DIR = path.join(UPLOADS_DIR, 'temp')
+export const GENERATED_UPLOADS_DIR = path.join(UPLOADS_DIR, 'generated')
 
 export function ensureUploadsDir() {
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true })
+  for (const directory of [UPLOADS_DIR, TEMP_UPLOADS_DIR, GENERATED_UPLOADS_DIR]) {
+    if (!fs.existsSync(directory)) {
+      fs.mkdirSync(directory, { recursive: true })
+    }
   }
 
   return UPLOADS_DIR
 }
 
-export function resolveUploadPathFromUrl(imageUrl = '') {
+export function getLocalObjectKeyFromUrl(imageUrl = '') {
   const rawUrl = String(imageUrl || '').trim()
-  if (!/^\/?uploads\/[^/\\]+$/.test(rawUrl)) return ''
+  const assetMatch = rawUrl.match(/^\/?api\/assets\/local\/((?:temp|generated)\/[^/\\]+|[^/\\]+)$/)
+  if (assetMatch) return assetMatch[1]
 
-  const filename = rawUrl.replace(/^\/?uploads\//, '')
-  if (!filename || path.basename(filename) !== filename) return ''
+  const legacyMatch = rawUrl.match(/^\/?uploads\/([^/\\]+)$/)
+  return legacyMatch ? legacyMatch[1] : ''
+}
+
+export function buildLocalAssetUrl(objectKey = '') {
+  const normalizedKey = String(objectKey || '').replace(/\\/g, '/').trim()
+  return normalizedKey ? `/api/assets/local/${normalizedKey}` : ''
+}
+
+export function resolveUploadPathFromUrl(imageUrl = '') {
+  const objectKey = getLocalObjectKeyFromUrl(imageUrl)
+  if (!objectKey) return ''
 
   const uploadsRoot = path.resolve(UPLOADS_DIR)
-  const resolvedPath = path.resolve(uploadsRoot, filename)
-  return path.dirname(resolvedPath) === uploadsRoot ? resolvedPath : ''
+  const resolvedPath = path.resolve(uploadsRoot, objectKey)
+  return resolvedPath.startsWith(`${uploadsRoot}${path.sep}`) ? resolvedPath : ''
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -54,8 +69,9 @@ export async function readUploadFileBufferWithRetry(filePath, options = {}) {
   throw lastError || new Error(`Failed to read upload file: ${filePath}`)
 }
 
-export function cleanupExpiredUploads(maxAgeMs = 24 * 60 * 60 * 1000) {
-  const uploadsDir = ensureUploadsDir()
+export function cleanupExpiredUploads(maxAgeMs = 24 * 60 * 60 * 1000, uploadsDir = TEMP_UPLOADS_DIR) {
+  ensureUploadsDir()
+  if (!fs.existsSync(uploadsDir)) return 0
   const cutoff = Date.now() - maxAgeMs
   let deletedCount = 0
 

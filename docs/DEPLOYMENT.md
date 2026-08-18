@@ -81,6 +81,18 @@
    AGENT_API_KEY=sk-your-api-key-here
    AGENT_BASE_URL=https://claudex.me/v1
    AGENT_MODEL=gpt-5.4-mini
+
+   DATABASE_URL=postgresql://amazon_image:your_password@127.0.0.1:5432/amazon_image?schema=public
+   AUTH_ENABLED=true
+   BOOTSTRAP_ADMIN_LOGIN=admin
+   BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
+   ```
+
+   启动前应用数据库迁移：
+
+   ```bash
+   npm run db:generate
+   npm run db:migrate:deploy
    ```
 
 4. **启动服务**

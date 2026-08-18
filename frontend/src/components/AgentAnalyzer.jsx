@@ -64,7 +64,8 @@ export default function AgentAnalyzer({
   referenceImages = [],
   primaryReferenceImageUrl = '',
   onReferenceImagesChange,
-  onAnalyzeComplete
+  onAnalyzeComplete,
+  onAnalyzingChange
 }) {
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState(null)
@@ -110,6 +111,7 @@ export default function AgentAnalyzer({
     }
 
     setAnalyzing(true)
+    onAnalyzingChange?.(true)
     setError(null)
     setSuccessMessage(null)
 
@@ -147,6 +149,7 @@ export default function AgentAnalyzer({
       alert(message)
     } finally {
       setAnalyzing(false)
+      onAnalyzingChange?.(false)
     }
   }
 
@@ -157,6 +160,7 @@ export default function AgentAnalyzer({
       </div>
 
       <button
+        type="button"
         className={`analyze-btn ${analyzing ? 'analyzing' : ''}`}
         onClick={handleAnalyze}
         disabled={analyzing}

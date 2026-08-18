@@ -75,6 +75,22 @@ Edit it first, fill your API keys, then run this script again:
 EOF
     exit 0
   fi
+
+  local required_key
+  for required_key in \
+    DATABASE_URL \
+    AUTH_ENABLED \
+    BOOTSTRAP_ADMIN_LOGIN \
+    BOOTSTRAP_ADMIN_PASSWORD \
+    STORAGE_S3_ENDPOINT \
+    STORAGE_S3_BUCKET \
+    STORAGE_S3_ACCESS_KEY \
+    STORAGE_S3_SECRET_KEY; do
+    if ! grep -qE "^${required_key}=.+" "$PROJECT_DIR/backend/.env"; then
+      echo "backend/.env is missing ${required_key}. Configure it before deployment."
+      exit 1
+    fi
+  done
 }
 
 build_project() {
@@ -87,9 +103,17 @@ build_project() {
   npm run build
 
   cd "$PROJECT_DIR/backend"
-  npm ci --omit=dev
+  npm ci
 
   mkdir -p "$PROJECT_DIR/backend/uploads" "$PROJECT_DIR/backend/logs"
+}
+
+run_database_migrations() {
+  log "Generating Prisma client and applying database migrations"
+  cd "$PROJECT_DIR/backend"
+  npm run db:generate
+  npm run db:migrate:deploy
+  npm prune --omit=dev
 }
 
 restart_pm2() {
@@ -104,6 +128,22 @@ restart_pm2() {
 
   pm2 save
   pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
+}
+
+verify_backend() {
+  log "Checking backend health"
+
+  local attempt
+  for attempt in {1..15}; do
+    if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/api/health" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  pm2 logs "$APP_NAME" --lines 80 --nostream || true
+  echo "Backend health check failed."
+  exit 1
 }
 
 write_nginx_http() {
@@ -228,7 +268,9 @@ main() {
       sync_project
       check_env
       build_project
+      run_database_migrations
       restart_pm2
+      verify_backend
       configure_nginx
       print_status
       ;;
@@ -236,7 +278,9 @@ main() {
       sync_project
       check_env
       build_project
+      run_database_migrations
       restart_pm2
+      verify_backend
       configure_nginx
       print_status
       ;;

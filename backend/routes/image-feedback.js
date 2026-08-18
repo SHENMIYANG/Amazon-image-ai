@@ -1,5 +1,6 @@
 import express from 'express'
 import OpenAI from 'openai'
+import { loadImageFeedbackThread, persistImageFeedbackExchange } from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
 
@@ -131,22 +132,51 @@ function buildContextPrompt(payload) {
   ].join('\n')
 }
 
+router.get('/thread', async (req, res) => {
+  try {
+    const workspaceId = String(req.query?.workspaceId || '').trim()
+    const imagePlanId = String(req.query?.imagePlanId || '').trim()
+    if (!workspaceId || !imagePlanId) {
+      return res.status(400).json({ success: false, message: 'workspaceId and imagePlanId are required' })
+    }
+
+    res.json({ success: true, data: await loadImageFeedbackThread({ workspaceId, imagePlanId, actor: req.auth }) })
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || '图片反馈记录读取失败' })
+  }
+})
+
 router.post('/chat', async (req, res) => {
   try {
     const userMessage = String(req.body?.userMessage || '').trim()
-    if (!userMessage) {
+    const workspaceId = String(req.body?.workspaceId || '').trim()
+    const imagePlanId = String(req.body?.imagePlanId || '').trim()
+    if (!userMessage || !workspaceId || !imagePlanId) {
       return res.status(400).json({
         success: false,
-        message: 'userMessage is required'
+        message: 'workspaceId, imagePlanId and userMessage are required'
       })
     }
 
+    const currentThread = await loadImageFeedbackThread({ workspaceId, imagePlanId, actor: req.auth })
     const openai = getOpenAIClient()
     const model = process.env.IMAGE_FEEDBACK_MODEL || process.env.AGENT_MODEL || 'gpt-4o-mini'
+    const feedbackReferenceImages = Array.isArray(req.body?.feedbackReferenceImages)
+      ? req.body.feedbackReferenceImages.filter(Boolean)
+      : []
     const messages = [
       { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: buildContextPrompt(req.body || {}) },
-      ...normalizeMessages(req.body?.messages),
+      {
+        role: 'user',
+        content: buildContextPrompt({
+          productBlueprint: currentThread.productBlueprint,
+          imagePlan: currentThread.imagePlan,
+          generatedImage: currentThread.generatedImage,
+          currentRevision: currentThread.revision,
+          feedbackReferenceImages
+        })
+      },
+      ...normalizeMessages(currentThread.messages),
       { role: 'user', content: userMessage }
     ]
 
@@ -168,7 +198,11 @@ router.post('/chat', async (req, res) => {
 
     const revision = normalizeRevision(parsed.revision)
     const intent = parsed.intent === 'generate_ready' ? 'generate_ready' : 'discuss'
-    const effectiveRevision = getEffectiveRevision(revision, req.body || {})
+    const effectiveRevision = getEffectiveRevision(revision, {
+      currentRevision: currentThread.revision,
+      imagePlan: currentThread.imagePlan,
+      generatedImage: currentThread.generatedImage
+    })
 
     if (intent === 'generate_ready' && (!effectiveRevision.strategyContent || !effectiveRevision.promptEn)) {
       return res.status(422).json({
@@ -177,13 +211,32 @@ router.post('/chat', async (req, res) => {
       })
     }
 
+    const reply = String(parsed.reply || '').trim()
+    const finalInstruction = String(parsed.finalInstruction || '').trim()
+    const assistantContent = [
+      reply || '我已理解并更新这张图的修图方向。',
+      intent === 'generate_ready' && finalInstruction ? `【最终生图指令摘要】\n${finalInstruction}` : ''
+    ].filter(Boolean).join('\n')
+    const thread = await persistImageFeedbackExchange({
+      workspaceId,
+      imagePlanId,
+      userMessage,
+      attachmentUrls: feedbackReferenceImages,
+      assistantContent,
+      intent,
+      revision: effectiveRevision,
+      model,
+      actor: req.auth
+    })
+
     res.json({
       success: true,
       data: {
         intent,
-        reply: String(parsed.reply || '').trim(),
-        revision,
-        finalInstruction: String(parsed.finalInstruction || '').trim()
+        reply,
+        revision: thread.revision,
+        finalInstruction,
+        thread
       }
     })
   } catch (error) {

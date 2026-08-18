@@ -24,7 +24,7 @@ bash scripts/server-deploy.sh install
 vim /opt/amazon-image-ai/backend/.env
 ```
 
-填好 API Key 后，再执行：
+填好 API Key、PostgreSQL 和 MinIO 配置后，再执行：
 
 ```bash
 cd /opt/amazon-image-ai
@@ -46,8 +46,28 @@ bash scripts/server-deploy.sh update
 - 安装依赖
 - 打包前端
 - 更新后端依赖
+- 生成 Prisma Client 并执行正式数据库迁移
 - 重启 PM2
+- 检查后端健康接口
 - 刷新 Nginx 配置
+
+`backend/.env` 必须包含：
+
+```env
+DATABASE_URL=postgresql://rrj:your_password@127.0.0.1:5432/amazon_image?schema=public
+AUTH_ENABLED=true
+BOOTSTRAP_ADMIN_LOGIN=admin
+BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
+
+STORAGE_S3_ENDPOINT=http://127.0.0.1:9000
+STORAGE_S3_REGION=us-east-1
+STORAGE_S3_BUCKET=amazon-image-assets
+STORAGE_S3_ACCESS_KEY=your_minio_access_key
+STORAGE_S3_SECRET_KEY=your_minio_secret_key
+STORAGE_S3_FORCE_PATH_STYLE=true
+```
+
+PostgreSQL 和 MinIO 必须先启动。部署脚本不会创建、删除或覆盖它们的数据容器。
 
 ## 只刷新 Nginx
 

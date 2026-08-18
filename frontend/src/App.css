@@ -9,6 +9,10 @@
   color: white;
   padding: 1.5rem 2rem;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .header h1 {
@@ -22,6 +26,120 @@
   margin-top: 0.4rem;
   font-size: 0.86rem;
   opacity: 0.92;
+}
+
+.header-account {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-account-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-right: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.header-account-name span {
+  margin-top: 0.15rem;
+  opacity: 0.85;
+}
+
+.header-account button,
+.header-account a {
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.header-account button:hover,
+.header-account a:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+@media (max-width: 960px) {
+  .header {
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.generation-busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(17, 24, 39, 0.5);
+}
+
+.generation-busy-dialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 0.7rem;
+  padding: 1.25rem;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.24);
+}
+
+.generation-busy-dialog strong {
+  font-size: 1.1rem;
+}
+
+.generation-busy-dialog span {
+  color: #4b5563;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.generation-busy-dialog button {
+  justify-self: start;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.55rem 0.9rem;
+  background: #b91c1c;
+  color: #fff;
+  cursor: pointer;
+}
+
+.generation-busy-dialog button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.generation-busy-dialog a {
+  width: fit-content;
+  color: #9a3412;
+  font-size: 0.85rem;
 }
 
 .main {
