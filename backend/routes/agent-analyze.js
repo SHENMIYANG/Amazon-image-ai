@@ -451,7 +451,7 @@ router.post('/', async (req, res) => {
       referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0
     })
 
-    const strategyTasks = requestedTasks.filter((task) => task.taskType !== 'main')
+    const strategyTasks = requestedTasks
     const sellingPointList = extractAgentSellingPointList(distinctSellingPoints || listingInfo)
     const {
       systemPrompt: combinedSystemPrompt,

@@ -10,6 +10,7 @@ import {
   getIncompleteStrategyPlanIds
 } from './routes/agent-analyze.js'
 import { normalizeExecutionRules } from './services/agent/executionRules.js'
+import { normalizeStrategyPlans } from './services/agent/planNormalizer.js'
 import { normalizeProductBlueprint } from './services/agent/productBlueprint.js'
 
 async function testMainImageNormalization() {
@@ -298,6 +299,27 @@ function testNonMainPromptDoesNotAddSpecificParts() {
   assert.doesNotMatch(prompt, /controller, cable, clamp, base/)
 }
 
+function testMainImageStrategyUsesAiPlanAndKeepsCompliance() {
+  const [plan] = normalizeStrategyPlans({
+    requestedTasks: [{ taskType: 'main', taskKey: 'main-1', name: 'Main Image' }],
+    strategyPlans: [{
+      taskKey: 'main-1',
+      imageRole: '45-degree studio packshot',
+      sellingFocus: 'Show the product shape clearly.',
+      strategyContent: '用 45 度棚拍角度展示产品轮廓，不使用文字。',
+      promptEn: 'Use a 45-degree studio packshot to show the product silhouette.',
+      copy: ['Not allowed']
+    }]
+  })
+  const prompt = buildAmazonPrompt({ productName: 'Test product' }, plan, 'L2', '2048x2048')
+
+  assert.equal(plan.strategyContent, '用 45 度棚拍角度展示产品轮廓，不使用文字。')
+  assert.deepEqual(plan.copy, [])
+  assert.ok(plan.executionRules.includes('纯白背景 RGB 255,255,255'))
+  assert.match(prompt, /Main image strategy: Use a 45-degree studio packshot/)
+  assert.match(prompt, /pure white RGB 255,255,255 background/)
+}
+
 await testMainImageNormalization()
 testScenarioUsageContract()
 testGeneratedImageSizeContract()
@@ -309,4 +331,5 @@ testExplicitBundleItemsAndDimensionsWin()
 testCurrentImageUsageDoesNotInventBundleExclusions()
 testConfirmedDimensionsProtectGeneration()
 testNonMainPromptDoesNotAddSpecificParts()
+testMainImageStrategyUsesAiPlanAndKeepsCompliance()
 console.log('generation pipeline tests passed')

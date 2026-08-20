@@ -774,9 +774,9 @@ function buildMainImagePrompt(listing, imagePlan, productBlueprint, visualBluepr
     lines.push('Hard constraints: ' + strategyConstraints.join(' | ') + '.')
   }
 
-  if (imagePlan?.regenerationMode && executionHint) {
-    lines.push('User regeneration direction: ' + executionHint + '.')
-    lines.push('The user direction may refine angle, accessory arrangement, or lighting, but it may not override the fixed white-background, centered, full-product, approximately 85% framing, no-text, and no-decoration rules above.')
+  if (executionHint) {
+    lines.push('Main image strategy: ' + executionHint + '.')
+    lines.push('This strategy may refine angle, confirmed accessory arrangement, or lighting, but it may not override the fixed white-background, centered, full-product, approximately 85% framing, no-text, and no-decoration rules above.')
   }
 
   return lines.join(' ')

@@ -15,7 +15,7 @@ function getVisualMarketingMethodology() {
     'Amazon image strategy method:',
     '1. The image must first prove the selling point visually. Copy only helps the buyer notice, understand, or avoid misunderstanding.',
     '2. Do not write image plans like PPT text. Plan visible evidence: product, quantity, color, scale, structure, action, scene, detail, comparison, connection, result.',
-    '3. Use this chain for every non-main image: buyer question -> selling conclusion -> visual evidence -> copy support -> misunderstanding boundary.',
+    '3. For non-main images, use this chain: buyer question -> selling conclusion -> visual evidence -> copy support -> misunderstanding boundary.',
     '4. A scene image is not a pretty background. It must answer: who uses it, where it is used, what action is happening, what need is solved, and what result is visible.',
     '5. Copy types: value conclusion, fact identification, mechanism explanation, local label, boundary or risk note.',
     '6. Do not repeat what the image already proves unless the text works as a navigation signal or prevents misunderstanding.',
@@ -108,7 +108,7 @@ function getStrategyModeInstruction(strategyMode, strategyTasks = []) {
   }
 
   if (strategyMode === 'main_only') {
-    return 'Only the fixed Amazon main image is needed. No non-main strategy planning is required.'
+    return 'Plan one compliant Amazon main image. Choose a product-specific camera angle, confirmed accessory arrangement, and studio lighting. Keep a pure white background, no text, no props or decoration, the complete product visible, and the subject centered at about 85% of the square canvas.'
   }
 
   return [
@@ -201,7 +201,7 @@ Hard rules:
 11. The strategy must think like a director, not like a database. Write what the image must prove, how the product should appear, what may support the message, and what must be avoided.
 12. Do not invent hidden geometry, unsupported quantities, unverified accessories, or unconfirmed claims.
 13. When image count is small, prioritize the biggest buying reasons first. When image count is larger, expand into detail, trust, usage, and supporting proof.
-14. Text is forbidden only for the Amazon main image. Non-main images may use concise copy when it helps conversion or understanding.
+14. For an Amazon main image, plan the compliant camera angle, confirmed accessory arrangement, and studio lighting. It must use a pure white RGB 255,255,255 background, show the complete product centered at about 85% of the frame, use no text, props, environment, or decoration, and return an empty copy array. Non-main images may use concise copy when it helps conversion or understanding.
 15. executionRules is the current image's execution protection for the image model and must be written in Chinese for the operator. Every non-main image must return one or more concrete rules from this image's strategy, product facts, references, and real usage. Prevent only real risks: wrong product structure, accessories, quantity, dimensions, copy, contact, use, placement, or physical relationship. Do not repeat the full strategy, use generic slogans, write English rules, or invent a fixed number of rules.
 16. productRules.mustKeep and productRules.forbidden must not be empty. They must be derived from the actual product images and product facts, not from generic category assumptions.
 17. copy must list the exact on-image text planned for that image. If the strategy says title, subtitle, tag, label, or copy, put those text lines in copy too. If copy is used, strategyContent must also show the exact same text in quotes. Do not ask the image model to invent copy.
@@ -235,8 +235,8 @@ Brand Color Preference: ${brandColorLabel}
 Complexity: ${complexity}
 Complexity Definition: ${complexityDefinition}
 
-Requested non-main image tasks
-${strategyTaskDescription || 'No non-main image tasks requested.'}
+Requested image tasks
+${strategyTaskDescription || 'No image tasks requested.'}
 
 Planning mode
 ${strategyMode}
@@ -245,7 +245,7 @@ Planning rule
 ${strategyModeInstruction}
 
 Selling point allocation note
-There are ${sellingPointList.length} detected selling points for ${strategyTasks.length} non-main requested images. You must consciously allocate buying missions across the selected shots. One image may cover multiple related selling points if they support the same buying reason. Do not repeat missions mechanically. Let complexity influence density and richness, not product truth.
+There are ${sellingPointList.length} detected selling points for ${strategyTasks.length} requested images. You must consciously allocate buying missions across the selected shots. One image may cover multiple related selling points if they support the same buying reason. Do not repeat missions mechanically. Let complexity influence density and richness, not product truth.
 
 Internal workflow reminder
 Step 1 product understanding must stay stable and independent from complexity.
