@@ -295,7 +295,7 @@ export default function ImageFeedbackChat({
   }
 
   return (
-    <div className="feedback-chat-modal" onClick={onClose}>
+    <div className="feedback-chat-modal">
       <div className="feedback-chat-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="feedback-chat-dialog__header">
           <div>

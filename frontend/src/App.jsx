@@ -14,7 +14,7 @@ import ActivityPage from './components/ActivityPage'
 import { getMarketplaceDefaultLanguage } from './components/GenerationPreferences'
 import { parseApiJson } from './utils/apiResponse'
 import { buildGenerateRequest, buildListingPayload, extractProductName, parseListingInfoSections } from './utils/requestPayload'
-import { buildDefaultPlansFromTasks, getDefaultImageTaskConfig, getSelectedImageTaskCount, MAIN_IMAGE_FIXED_RULE, normalizeImagePlan } from './utils/imageTasks'
+import { buildDefaultPlansFromTasks, getDefaultImageTaskConfig, getSelectedImageTaskCount, normalizeImagePlan } from './utils/imageTasks'
 import './App.css'
 
 function parseImageResolution(resolution) {
@@ -114,7 +114,10 @@ async function requestGeneratedImage({ listing, plan, resolution, referenceImage
     throw new Error(generatedImage?.error || data.message || '生成失败')
   }
 
-  return generatedImage
+  return {
+    ...generatedImage,
+    persistenceWarning: data.persistenceWarning || ''
+  }
 }
 
 function buildImageVersionSnapshot(image = {}) {
@@ -168,6 +171,7 @@ function buildCompletedImageState(image = {}, generatedImage = {}, fallbackPlan 
     prompt: generatedImage.prompt || generatedImage.executionPromptEn || image.prompt || '',
     promptDirty: false,
     regenerationError: null,
+    persistenceWarning: generatedImage.persistenceWarning || null,
     actualResolution: generatedImage.actualResolution || null,
     requestedResolution: generatedImage.resolution || image.requestedResolution,
     sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -299,25 +303,6 @@ function App() {
   const [authEnabled, setAuthEnabled] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [pathname, setPathname] = useState(() => window.location.pathname)
-  const busyOverlayRef = useRef(null)
-  const isBusy = generating || analyzing
-
-  useEffect(() => {
-    if (!isBusy) return undefined
-
-    document.activeElement instanceof HTMLElement && document.activeElement.blur()
-    busyOverlayRef.current?.focus()
-
-    const blockKeyboard = (event) => {
-      if (event.target instanceof Element && event.target.closest('.generation-busy-overlay')) return
-      event.preventDefault()
-      event.stopPropagation()
-    }
-
-    window.addEventListener('keydown', blockKeyboard, true)
-    return () => window.removeEventListener('keydown', blockKeyboard, true)
-  }, [isBusy])
-
   useEffect(() => {
     let active = true
 
@@ -366,7 +351,6 @@ function App() {
   }, [])
 
   const navigateTo = (nextPath) => {
-    if (isBusy) return
     window.history.pushState({}, '', nextPath)
     setPathname(nextPath)
   }
@@ -498,7 +482,7 @@ function App() {
     const normalizedPlans = (imagePlans || []).map((plan) =>
       normalizeImagePlan({
         ...plan,
-        strategyContent: (plan.taskType || plan.type) === 'main' ? MAIN_IMAGE_FIXED_RULE : plan.strategyContent || '',
+        strategyContent: plan.strategyContent || '',
         imageRole: plan.imageRole || '',
         sellingFocus: plan.sellingFocus || '',
         executionRules: plan.executionRules || [],
@@ -1250,7 +1234,7 @@ function App() {
                 使用记录
               </a>
               {currentUser.role === 'ADMIN' && (
-                <button type="button" onClick={() => navigateTo('/members')} disabled={isBusy}>
+                <button type="button" onClick={() => navigateTo('/members')}>
                   成员与权限
                 </button>
               )}
@@ -1368,22 +1352,6 @@ function App() {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <WorkspaceChatModal isOpen={isWorkspaceChatOpen} onClose={() => setIsWorkspaceChatOpen(false)} />
-      {isBusy && (
-        <div ref={busyOverlayRef} className="generation-busy-overlay" role="status" aria-live="assertive" tabIndex="-1">
-          <div className="generation-busy-dialog">
-            <strong>{analyzing ? '正在生成出图策略' : '正在生成图片'}</strong>
-            <span>请等待当前任务完成后再修改产品、策略、任务或页面。</span>
-            <a href="/activity" target="_blank" rel="noreferrer">
-              在新页面打开使用记录
-            </a>
-            {generating && (
-              <button type="button" onClick={handleStop} disabled={stopping}>
-                {stopping ? '正在停止...' : '停止生成'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

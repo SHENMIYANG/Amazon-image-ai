@@ -203,7 +203,7 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       type: task.taskType,
       blueprint: task.blueprint,
       purpose: task.description,
-      strategyContent: task.taskType === 'main' ? MAIN_IMAGE_FIXED_RULE : '',
+      strategyContent: '',
       placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
       promptEn: '',
       promptDirty: false

@@ -59,7 +59,7 @@ export default function SettingsModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="settings-modal-overlay" onClick={onClose}>
+    <div className="settings-modal-overlay">
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>⚙️ API 配置状态</h2>

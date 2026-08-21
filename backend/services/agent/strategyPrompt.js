@@ -29,7 +29,7 @@ function getVisualMarketingMethodology() {
 function getStrategyContentContract() {
   return [
     'strategyContent writing contract:',
-    '- Write in Chinese for the operator.',
+    '- Write strategyContent in Chinese only for the operator. Do not use the marketplace language, English, or any other language in this field.',
     '- It must be a usable director script, not a field list and not a generic description.',
     '- It must state the buyer question or purchase doubt this image answers.',
     '- It must state the visual evidence: what the image must show so the selling point is proven even if all text is covered.',
@@ -208,6 +208,7 @@ Hard rules:
 18. currentImageProductUsage must decide which products or accessories are needed for this one image. Use displayMode as one of: full_set, selected_items, single_item, detail_part. Do not force full-set quantity into scenario or detail images unless that image is explicitly about the full set.
 19. Do not make gift boxes, storage boxes, ribbons, cards, packaging, organizers, props, or display containers the image mission unless the user explicitly says they are included or required. If they are only scene props, state that they are props and must not be understood as included accessories.
 20. Supplied dimensions and explicitly named included items are confirmed facts. Do not alter, estimate, expand, or invent their values. If a requested image needs a fact that is not supplied or clearly visible in a reference image, omit that fact instead of guessing.
+21. strategyContent must contain Chinese. promptEn must contain the English execution version. Never substitute the marketplace language for strategyContent.
 
 ${visualMarketingMethodology}
 

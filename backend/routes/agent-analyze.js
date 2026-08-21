@@ -298,10 +298,9 @@ function parseCompletionJson(completion, label) {
 export function getIncompleteStrategyPlanIds(plans = []) {
   return (Array.isArray(plans) ? plans : [])
     .filter((plan) =>
-      plan.taskType !== 'main' && (
-        !String(plan.strategyContent || '').trim() ||
-        !String(plan.promptEn || '').trim()
-      )
+      !String(plan.strategyContent || '').trim() ||
+      !/[\u3400-\u9fff]/.test(String(plan.strategyContent || '')) ||
+      !String(plan.promptEn || '').trim()
     )
     .map((plan) => plan.id)
 }

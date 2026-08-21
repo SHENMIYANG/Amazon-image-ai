@@ -9,7 +9,7 @@ export default function WorkspaceChatModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="workspace-chat-modal-overlay" onClick={onClose}>
+    <div className="workspace-chat-modal-overlay">
       <div className="workspace-chat-modal" onClick={(event) => event.stopPropagation()}>
         <div className="workspace-chat-modal__header">
           <div>

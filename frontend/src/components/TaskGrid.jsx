@@ -346,6 +346,10 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                 <div className="regeneration-warning">重新生成失败，已保留上一张图片：{image.regenerationError}</div>
               ) : null}
 
+              {image.persistenceWarning ? (
+                <div className="regeneration-warning">{image.persistenceWarning} 图片仍可下载，请勿重复生成。</div>
+              ) : null}
+
               <div className="image-content">
                 {image.imageUrl ? (
                   <button className="image-preview-button" onClick={() => handleOpenPreview(image)} title="查看大图">
@@ -439,7 +443,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
       ) : null}
 
       {regenerateDialog ? (
-        <div className="image-preview-modal regenerate-modal" onClick={closeRegenerateDialog}>
+        <div className="image-preview-modal regenerate-modal">
           <div className="regenerate-dialog" onClick={(event) => event.stopPropagation()}>
             <div className="regenerate-dialog__header">
               <div>

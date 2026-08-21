@@ -418,7 +418,7 @@ export default function AmazonListingForm({
       )}
 
       {expandedEditor && (
-        <div className="editor-modal-overlay" onClick={closeExpandedEditor}>
+        <div className="editor-modal-overlay">
           <div className="editor-modal-dialog" onClick={(event) => event.stopPropagation()}>
             <div className="editor-modal-header">
               <div>

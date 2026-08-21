@@ -67,14 +67,34 @@ test('使用记录在当前列表中打开详情抽屉', async ({ page, context 
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
-test('策略生成期间锁定成员入口，但可在新页签打开使用记录', async ({ page, context }) => {
+test('策略生成期间可切换页面且请求继续完成', async ({ page, context }) => {
   await mockApi(context)
 
   let releaseUpload
   const uploadHeld = new Promise((resolve) => { releaseUpload = resolve })
+  let finishAnalysis
+  const analysisFinished = new Promise((resolve) => { finishAnalysis = resolve })
   await context.route('**/api/upload', async (route) => {
     await uploadHeld
     await json(route, { success: true, images: [{ url: '/api/assets/local/temp/test-product.png' }] })
+  })
+  await context.route('**/api/assets/local/temp/test-product.png?probe=*', (route) => route.fulfill({ status: 200 }))
+  await context.route('**/api/agent-analyze', async (route) => {
+    await json(route, {
+      success: true,
+      data: {
+        productBlueprint: {},
+        imagePlans: [{
+          id: 1,
+          taskKey: 'main-1',
+          taskType: 'main',
+          name: 'Main Image',
+          strategyContent: '中文主图策略。',
+          promptEn: 'English main image prompt.'
+        }]
+      }
+    })
+    finishAnalysis()
   })
 
   await page.goto('/')
@@ -87,14 +107,10 @@ test('策略生成期间锁定成员入口，但可在新页签打开使用记�
   await expect(page.getByText(/已上传 1/)).toBeVisible()
 
   await page.getByRole('button', { name: '一键生成出图方案' }).click()
-  await expect(page.getByText('正在生成出图策略')).toBeVisible()
-  await expect(page.getByRole('button', { name: '成员与权限' })).toBeDisabled()
-
-  const activityPagePromise = context.waitForEvent('page')
-  await page.getByRole('link', { name: '在新页面打开使用记录' }).click()
-  const activityPage = await activityPagePromise
-  await activityPage.waitForLoadState()
-  await expect(activityPage).toHaveURL(/\/activity$/)
+  await expect(page.getByRole('button', { name: '成员与权限' })).toBeEnabled()
+  await page.getByRole('button', { name: '成员与权限' }).click()
+  await expect(page).toHaveURL(/\/members$/)
 
   releaseUpload()
+  await analysisFinished
 })

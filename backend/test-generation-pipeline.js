@@ -152,11 +152,12 @@ function testStrategyContractAndInputDeduplication() {
 
   assert.deepEqual(
     getIncompleteStrategyPlanIds([
-      { id: 1, taskType: 'main', strategyContent: 'fixed', promptEn: 'fixed' },
+      { id: 1, taskType: 'main', strategyContent: '中文主图策略', promptEn: 'English main image prompt' },
       { id: 2, taskType: 'feature', strategyContent: '中文策略', promptEn: '' },
-      { id: 3, taskType: 'detail', strategyContent: '', promptEn: 'English prompt' }
+      { id: 3, taskType: 'detail', strategyContent: '', promptEn: 'English prompt' },
+      { id: 4, taskType: 'scenario', strategyContent: 'Diese Strategie ist auf Deutsch.', promptEn: 'English prompt' }
     ]),
-    [2, 3]
+    [2, 3, 4]
   )
 
 }

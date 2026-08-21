@@ -140,7 +140,7 @@ export default function MembersPage({ currentUser, onBack }) {
       </main>
 
       {showCreate && (
-        <div className="members-modal-overlay" onClick={() => setShowCreate(false)}>
+        <div className="members-modal-overlay">
           <form className="members-modal" onSubmit={createMember} onClick={(event) => event.stopPropagation()}>
             <h2>添加成员</h2>
             <label>账号<input required value={draft.loginName} onChange={(event) => setDraft({ ...draft, loginName: event.target.value })} /></label>
