@@ -39,7 +39,8 @@ router.post('/', upload.array('images', MAX_UPLOAD_FILES), async (req, res) => {
 
     const images = await Promise.all(req.files.map(async (file) => {
       const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`
-      const stored = await writeAsset({ objectKey: `temp/${filename}`, body: file.buffer, contentType: file.mimetype })
+      const objectPrefix = req.query?.kind === 'feedback' ? 'feedback' : 'reference'
+      const stored = await writeAsset({ objectKey: `${objectPrefix}/${filename}`, body: file.buffer, contentType: file.mimetype })
       const asset = await createUploadedAsset({
         ...stored,
         mimeType: file.mimetype,

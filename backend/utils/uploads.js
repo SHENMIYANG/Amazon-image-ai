@@ -8,9 +8,11 @@ const __dirname = path.dirname(__filename)
 export const UPLOADS_DIR = path.join(__dirname, '..', 'uploads')
 export const TEMP_UPLOADS_DIR = path.join(UPLOADS_DIR, 'temp')
 export const GENERATED_UPLOADS_DIR = path.join(UPLOADS_DIR, 'generated')
+export const REFERENCE_UPLOADS_DIR = path.join(UPLOADS_DIR, 'reference')
+export const FEEDBACK_UPLOADS_DIR = path.join(UPLOADS_DIR, 'feedback')
 
 export function ensureUploadsDir() {
-  for (const directory of [UPLOADS_DIR, TEMP_UPLOADS_DIR, GENERATED_UPLOADS_DIR]) {
+  for (const directory of [UPLOADS_DIR, TEMP_UPLOADS_DIR, GENERATED_UPLOADS_DIR, REFERENCE_UPLOADS_DIR, FEEDBACK_UPLOADS_DIR]) {
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true })
     }
@@ -21,7 +23,7 @@ export function ensureUploadsDir() {
 
 export function getLocalObjectKeyFromUrl(imageUrl = '') {
   const rawUrl = String(imageUrl || '').trim()
-  const assetMatch = rawUrl.match(/^\/?api\/assets\/local\/((?:temp|generated)\/[^/\\]+|[^/\\]+)$/)
+  const assetMatch = rawUrl.match(/^\/?api\/assets\/local\/((?:temp|generated|reference|feedback)\/[^/\\]+|[^/\\]+)$/)
   if (assetMatch) return assetMatch[1]
 
   const legacyMatch = rawUrl.match(/^\/?uploads\/([^/\\]+)$/)

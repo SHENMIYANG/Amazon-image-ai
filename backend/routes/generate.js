@@ -27,6 +27,21 @@ function getMaxReferenceImages() {
     : 8
 }
 
+export function buildGenerationSuccessResponse({ images, persistence, persistenceRequired }) {
+  const response = {
+    success: true,
+    images,
+    timestamp: new Date().toISOString(),
+    persistence
+  }
+
+  if (persistenceRequired && !persistence) {
+    response.persistenceWarning = '图片已生成，但生成记录保存失败。请检查数据库。'
+  }
+
+  return response
+}
+
 router.post('/', async (req, res) => {
   const generationRequestId = `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
   const startedAt = Date.now()
@@ -251,19 +266,11 @@ router.post('/', async (req, res) => {
       actor: req.auth
     })
 
-    if (req.auth && !persistence) {
-      return res.status(500).json({
-        error: 'Persistence failed',
-        message: '图片已生成，但生成记录保存失败。请检查数据库后重试。'
-      })
-    }
-
-    res.json({
-      success: true,
+    res.json(buildGenerationSuccessResponse({
       images: generatedImages,
-      timestamp: new Date().toISOString(),
-      persistence
-    })
+      persistence,
+      persistenceRequired: Boolean(req.auth)
+    }))
   } catch (error) {
     console.error('Generate error:', error.response?.data || error.message)
 

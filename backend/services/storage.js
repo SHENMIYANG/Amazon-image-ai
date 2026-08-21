@@ -8,7 +8,7 @@ let client = null
 
 function normalizeObjectKey(objectKey = '') {
   const key = String(objectKey || '').replace(/\\/g, '/').replace(/^\/+/, '')
-  if (!key || key.includes('..') || !/^(temp|generated)\/[A-Za-z0-9._-]+$/.test(key)) return ''
+  if (!key || key.includes('..') || !/^(temp|generated|reference|feedback)\/[A-Za-z0-9._-]+$/.test(key)) return ''
   return key
 }
 
@@ -22,9 +22,9 @@ export function buildAssetUrl(storageProvider = getStorageProvider(), objectKey 
 }
 
 export function getAssetReferenceFromUrl(url = '') {
-  const match = String(url || '').trim().match(/^\/?api\/assets\/(local|s3)\/((?:temp|generated)\/[A-Za-z0-9._-]+)$/)
+  const match = String(url || '').trim().match(/^\/?api\/assets\/(local|s3)\/((?:temp|generated|reference|feedback)\/[A-Za-z0-9._-]+)$/)
   if (match) return { storageProvider: match[1], objectKey: match[2] }
-  const legacy = String(url || '').trim().match(/^\/?uploads\/((?:temp|generated)\/[A-Za-z0-9._-]+)$/)
+  const legacy = String(url || '').trim().match(/^\/?uploads\/((?:temp|generated|reference|feedback)\/[A-Za-z0-9._-]+)$/)
   return legacy ? { storageProvider: 'local', objectKey: legacy[1] } : null
 }
 
