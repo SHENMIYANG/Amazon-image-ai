@@ -14,9 +14,24 @@ import {
   extractSellingPointList as extractAgentSellingPointList,
   getComplexityDefinition as getAgentComplexityDefinition
 } from '../services/agent/strategyPrompt.js'
-import { persistStrategyResult } from '../services/persistence/workbenchRepository.js'
+import { assertAccessibleAssetUrls, persistStrategyResult } from '../services/persistence/workbenchRepository.js'
+import { getDatabaseClient } from '../services/persistence/client.js'
+import { buildAssetUrl } from '../services/storage.js'
 
 const router = express.Router()
+
+export function applyStrategyPersistenceResult(responseData = {}, persistence = null, persistenceRequired = false) {
+  const nextData = {
+    ...responseData,
+    _meta: { ...(responseData._meta || {}) }
+  }
+
+  if (persistenceRequired && !persistence) {
+    nextData._meta.persistenceWarning = '策略已生成，但工作区记录保存失败。当前策略仍可查看和修改，请勿重复付费生成。'
+  }
+
+  return nextData
+}
 
 const IMAGE_TASK_LIBRARY = {
   main: {
@@ -130,7 +145,8 @@ function normalizeSelectedImageTasks(selectedImageTasks = []) {
   return source
     .map((item) => {
       const type = item?.type
-      const count = Math.max(0, Math.min(6, Number(item?.count || 0)))
+      const limit = type === 'feature' ? 8 : 6
+      const count = Math.max(0, Math.min(limit, Number(item?.count || 0)))
       if (!IMAGE_TASK_LIBRARY[type] || count === 0) return null
       return { type, count }
     })
@@ -209,6 +225,56 @@ function normalizeContextSegment(value = '') {
   return cleanContextSegment(value).toLowerCase()
 }
 
+export function bindLayoutTemplatesToTasks(tasks = [], templates = []) {
+  if (!templates.length) return tasks
+  const featureTasks = tasks.filter((task) => task.taskType === 'feature')
+  if (featureTasks.length !== templates.length) {
+    const error = new Error('选择模板后，卖点图数量必须与模板数量一致。')
+    error.statusCode = 400
+    throw error
+  }
+
+  let templateIndex = 0
+  return tasks.map((task) => {
+    if (task.taskType !== 'feature') return task
+    const template = templates[templateIndex++]
+    return {
+      ...task,
+      name: `${task.name} · ${template.name}`,
+      purpose: `${task.purpose} 参考所选模板的卖点表达和视觉证据方式。`,
+      guidance: `${task.guidance} 迁移模板的构图、信息层级和卖点证明方法；禁止复制竞品品牌、文字、产品外观或未经证实的参数。`,
+      layoutTemplateId: template.id,
+      layoutTemplateName: template.name,
+      layoutTemplateUrl: template.imageUrl
+    }
+  })
+}
+
+async function getSelectedLayoutTemplates(ids = [], actor = null) {
+  const templateIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean))]
+  if (templateIds.length === 0) return []
+  const db = await getDatabaseClient()
+  if (!db || !actor?.organizationId) throw createAgentAnalyzeError({ stage: 'layout_templates', status: 503, message: '公共模板暂不可用。' })
+  const templates = await db.layoutTemplate.findMany({
+    where: {
+      id: { in: templateIds },
+      organizationId: actor.organizationId,
+      archivedAt: null,
+      OR: [
+        { scope: 'PUBLIC' },
+        { scope: 'PERSONAL', createdById: actor.userId }
+      ]
+    },
+    include: { asset: true }
+  })
+  if (templates.length !== templateIds.length) throw createAgentAnalyzeError({ stage: 'layout_templates', status: 403, message: '所选模板不存在或已归档。' })
+  const byId = new Map(templates.map((template) => [template.id, template]))
+  return templateIds.map((id) => {
+    const template = byId.get(id)
+    return { id: template.id, name: template.name, imageUrl: buildAssetUrl(template.asset.storageProvider, template.asset.objectKey) }
+  })
+}
+
 export function getDistinctSellingPoints(sellingPoints = '', listingInfo = '') {
   const points = String(sellingPoints || '').trim()
   const listing = String(listingInfo || '').trim()
@@ -223,7 +289,7 @@ function getReferenceRoleLabel(role = '') {
   const labels = {
     primary_product: 'the explicit primary product image and the highest authority for product truth',
     supporting_product: 'a supporting product image that may supplement angle, contents, usage, or structure without overriding primary product truth',
-    layout_style_reference: 'a layout or style reference that may guide composition, visual hierarchy, or atmosphere only and must not change product truth',
+    layout_style_reference: 'a selling-point layout reference that may guide composition, information hierarchy, and visual proof, but must not transfer competitor product truth, branding, copy, or unsupported claims',
     regeneration_reference: 'a user-added correction reference for this regeneration only; it may guide the requested correction without changing primary product truth'
   }
 
@@ -236,7 +302,7 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
   const roleByUrl = new Map(
     (Array.isArray(referenceImageRoles) ? referenceImageRoles : [])
       .filter((item) => item?.url)
-      .map((item) => [item.url, item.role])
+      .map((item) => [item.url, item])
   )
   const orderedReferenceImages = []
 
@@ -250,16 +316,17 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
     }
   })
 
-  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 8).entries()) {
+  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 16).entries()) {
     const reference = getAssetReferenceFromUrl(imageUrl)
     if (!reference) continue
 
+    const referenceRole = roleByUrl.get(imageUrl)
     const role = imageUrl === primaryReferenceImageUrl
       ? 'primary_product'
-      : roleByUrl.get(imageUrl) || 'supporting_product'
+      : referenceRole?.role || 'supporting_product'
     contentParts.push({
       type: 'text',
-      text: `Reference image ${index + 1} is ${getReferenceRoleLabel(role)}.`
+      text: `Reference image ${index + 1} is ${getReferenceRoleLabel(role)}.${referenceRole?.label ? ` It is ${referenceRole.label}.` : ''}`
     })
 
     const ext = path.extname(reference.objectKey).toLowerCase()
@@ -338,6 +405,8 @@ router.post('/', async (req, res) => {
       brandColor,
       sellingPoints,
       selectedImageTasks = [],
+      layoutTemplateIds = [],
+      analysisRevision = 0,
       referenceImages = [],
       primaryReferenceImageUrl = '',
       referenceImageRoles = [],
@@ -367,7 +436,13 @@ router.post('/', async (req, res) => {
       })
     }
 
-    const requestedTasks = expandSelectedImageTasks(selectedImageTasks)
+    const layoutTemplates = await getSelectedLayoutTemplates(layoutTemplateIds, req.auth)
+    let requestedTasks
+    try {
+      requestedTasks = bindLayoutTemplatesToTasks(expandSelectedImageTasks(selectedImageTasks), layoutTemplates)
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ error: 'Invalid templates', message: error.message, requestId })
+    }
     if (requestedTasks.length === 0) {
       return res.status(400).json({
         error: 'Invalid tasks',
@@ -376,10 +451,10 @@ router.post('/', async (req, res) => {
       })
     }
 
-    if (requestedTasks.length > 12) {
+    if (requestedTasks.length > 16) {
       return res.status(400).json({
         error: 'Too many tasks',
-        message: 'At most 12 image tasks can be analyzed at once',
+        message: 'At most 16 image tasks can be analyzed at once',
         requestId
       })
     }
@@ -407,10 +482,21 @@ router.post('/', async (req, res) => {
 
     let imageContentParts
     try {
+      const templateReferenceImages = layoutTemplates.map((template) => template.imageUrl)
+      const strategyReferenceImages = [...new Set([...referenceImages, ...templateReferenceImages])]
+      const strategyReferenceRoles = [
+        ...referenceImageRoles,
+        ...layoutTemplates.map((template, index) => ({
+          url: template.imageUrl,
+          role: 'layout_style_reference',
+          label: `template "${template.name}" selected for feature-${index + 1}`
+        }))
+      ]
+      await assertAccessibleAssetUrls({ urls: strategyReferenceImages, actor: req.auth })
       imageContentParts = await buildImageContentParts(
         explicitPrimaryReferenceImageUrl,
-        referenceImages,
-        referenceImageRoles
+        strategyReferenceImages,
+        strategyReferenceRoles
       )
     } catch (error) {
       throw createAgentAnalyzeError({
@@ -570,7 +656,7 @@ router.post('/', async (req, res) => {
       })
     }
 
-    const responseData = {
+    let responseData = {
       productBlueprint,
       imagePlans: normalizedPlans,
       _meta: {
@@ -579,6 +665,7 @@ router.post('/', async (req, res) => {
         productUnderstandingNeedsReview: false,
         productUnderstandingRepaired: false,
         generatedAt: new Date().toISOString(),
+        analysisRevision: Number(analysisRevision || 0),
         requestId
       }
     }
@@ -597,12 +684,7 @@ router.post('/', async (req, res) => {
       actor: req.auth
     })
 
-    if (req.auth && !persistence) {
-      return res.status(500).json({
-        error: 'Persistence failed',
-        message: '策略已生成，但工作区记录保存失败。请检查数据库后重试。'
-      })
-    }
+    responseData = applyStrategyPersistenceResult(responseData, persistence, Boolean(req.auth))
 
     if (persistence) {
       const planIdsByTaskKey = new Map(
@@ -631,6 +713,7 @@ router.post('/', async (req, res) => {
     res.json({
       success: true,
       data: responseData,
+      persistenceWarning: responseData._meta.persistenceWarning || undefined,
       usage: {
         combined: combinedCompletion.usage || null
       }

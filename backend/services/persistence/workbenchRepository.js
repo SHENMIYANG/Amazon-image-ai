@@ -84,16 +84,44 @@ export async function getAccessibleAsset({ storageProvider, objectKey, actor = n
       organizationId: actor.organizationId,
       storageProvider,
       objectKey,
-      ...(canAccessAllWorkspaces(actor)
-        ? {}
-        : {
-            OR: [
-              { createdById: actor.userId },
-              { workspace: { createdById: actor.userId, deletedAt: null } }
-            ]
-          })
+      OR: [
+        {
+          layoutTemplate: {
+            is: {
+              archivedAt: null,
+              OR: [{ scope: 'PUBLIC' }, { scope: 'PERSONAL', createdById: actor.userId }]
+            }
+          }
+        },
+        {
+          role: { not: 'LAYOUT_TEMPLATE' },
+          ...(canAccessAllWorkspaces(actor)
+            ? {}
+            : { OR: [{ createdById: actor.userId }, { workspace: { createdById: actor.userId, deletedAt: null } }] })
+        }
+      ]
     }
   })
+}
+
+export async function assertAccessibleAssetUrls({ urls = [], actor = null }) {
+  const references = [...new Map((Array.isArray(urls) ? urls : []).filter(Boolean).map((url) => {
+    const reference = assetReference(url)
+    return reference ? [`${reference.storageProvider}:${reference.objectKey}`, reference] : [String(url), null]
+  })).values()]
+
+  for (const reference of references) {
+    if (!reference) {
+      const error = new Error('参考图片地址无效，请重新上传。')
+      error.statusCode = 400
+      throw error
+    }
+    if (actor && !await getAccessibleAsset({ ...reference, actor })) {
+      const error = new Error('参考图片不存在或当前账号无权使用。')
+      error.statusCode = 403
+      throw error
+    }
+  }
 }
 
 async function resolveWorkspace(db, organizationId, input = {}, actor = null) {
@@ -175,10 +203,20 @@ async function upsertReferenceAssets(db, { organizationId, workspaceId, inputVer
     const reference = assetReference(url)
     if (!reference) continue
 
-    const asset = await db.asset.upsert({
-      where: { storageProvider_objectKey: reference },
-      update: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey), workspaceId, organizationId },
-      create: {
+    const existingAsset = await db.asset.findUnique({ where: { storageProvider_objectKey: reference } })
+    if (existingAsset && existingAsset.organizationId !== organizationId) {
+      const error = new Error('参考图片不属于当前组织。')
+      error.statusCode = 403
+      throw error
+    }
+    if (existingAsset?.role === 'LAYOUT_TEMPLATE') {
+      const error = new Error('公共模板不能作为产品参考图写入工作区。')
+      error.statusCode = 400
+      throw error
+    }
+    const asset = existingAsset
+      ? await db.asset.update({ where: { id: existingAsset.id }, data: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey), workspaceId } })
+      : await db.asset.create({ data: {
         organizationId,
         workspaceId,
         storageProvider: reference.storageProvider,
@@ -187,8 +225,7 @@ async function upsertReferenceAssets(db, { organizationId, workspaceId, inputVer
         mimeType: getMimeType(reference.objectKey),
         role: 'PRODUCT_REFERENCE',
         createdById
-      }
-    })
+      } })
 
     const role = url === primaryUrl
       ? 'PRIMARY_PRODUCT'
@@ -220,6 +257,7 @@ function getMimeType(objectKey = '') {
 
 function mapPlanVersion(plan = {}) {
   return {
+    layoutTemplateId: String(plan.layoutTemplateId || '').trim() || null,
     imageRole: String(plan.imageRole || ''),
     sellingFocus: String(plan.sellingFocus || plan.primarySellingPoint || ''),
     strategyContent: String(plan.strategyContent || ''),
@@ -543,6 +581,7 @@ export async function persistImageFeedbackExchange({ workspaceId, imagePlanId, u
         copy: currentVersion?.copy || null,
         executionRules: toJson(revision.executionRules || currentVersion?.executionRules || []),
         usage: currentVersion?.usage || null,
+        layoutTemplateId: currentVersion?.layoutTemplateId || null,
         source: 'FEEDBACK',
         createdById: actor?.userId || null
       }
@@ -574,7 +613,7 @@ export async function persistImageFeedbackExchange({ workspaceId, imagePlanId, u
   })
 }
 
-export async function persistGenerationResult({ executionContext, images, model, requestId, durationMs, actor = null }) {
+export async function persistGenerationResult({ executionContext, images, model, requestId, durationMs, generationRunId = null, actor = null }) {
   const persistence = executionContext?.persistence || {}
   const workspaceId = String(persistence.workspaceId || '').trim()
   const imagePlanId = String(persistence.imagePlanId || '').trim()
@@ -608,8 +647,7 @@ export async function persistGenerationResult({ executionContext, images, model,
       if (!imagePlanVersion) return null
 
       const completedImages = (Array.isArray(images) ? images : []).filter((image) => image?.status === 'completed')
-      const generationRun = await tx.generationRun.create({
-        data: {
+      const generationRunData = {
           workspaceId,
           imagePlanId,
           imagePlanVersionId,
@@ -627,8 +665,13 @@ export async function persistGenerationResult({ executionContext, images, model,
             ? null
             : String((images || []).find((image) => image?.error)?.error || 'Image generation failed'),
           createdById: actor?.userId || null
-        }
-      })
+      }
+      const existingRun = generationRunId
+        ? await tx.generationRun.findFirst({ where: { id: generationRunId, workspaceId, imagePlanId }, select: { id: true } })
+        : null
+      const generationRun = existingRun
+        ? await tx.generationRun.update({ where: { id: existingRun.id }, data: generationRunData })
+        : await tx.generationRun.create({ data: generationRunData })
 
       for (const image of completedImages) {
         const reference = assetReference(image.imageUrl)
@@ -698,6 +741,109 @@ export async function persistGenerationResult({ executionContext, images, model,
     })
   } catch (error) {
     console.error('[persistence] failed to save generation result', { workspaceId, imagePlanId, message: error.message })
+    if (generationRunId) {
+      try {
+        const db = await getDatabaseClient()
+        await db?.generationRun.updateMany({
+          where: { id: generationRunId, workspaceId, imagePlanId },
+          data: { status: 'FAILED', completedAt: new Date(), errorMessage: '生成结果保存失败，请检查使用记录。' }
+        })
+      } catch (finalizeError) {
+        console.error('[persistence] failed to finalize generation run', { generationRunId, message: finalizeError.message })
+      }
+    }
+    return null
+  }
+}
+
+function serializeGenerationRun(run) {
+  if (!run) return null
+  return {
+    id: run.id,
+    requestId: run.requestId,
+    status: run.status,
+    errorMessage: run.errorMessage,
+    imagePlanId: run.imagePlanId,
+    images: (run.generatedImages || []).map((image) => ({
+      imageUrl: assetUrl(image.asset) || image.imageUrlSnapshot,
+      status: 'completed',
+      resolution: image.requestResolution,
+      actualResolution: image.actualResolution,
+      actualWidth: image.width,
+      actualHeight: image.height,
+      sizeMatchesRequest: true
+    }))
+  }
+}
+
+export async function getGenerationRunByRequestId({ requestId, actor = null }) {
+  if (!isPersistenceEnabled() || !requestId) return null
+  const db = await getDatabaseClient()
+  if (!db) return null
+  const run = await db.generationRun.findFirst({
+    where: {
+      requestId,
+      workspace: actor?.organizationId
+        ? workspaceAccessScope(actor.organizationId, actor)
+        : { deletedAt: null }
+    },
+    include: { generatedImages: { include: { asset: true } } }
+  })
+  return serializeGenerationRun(run)
+}
+
+export async function beginGenerationRun({ executionContext, model, requestId, actor = null }) {
+  const persistence = executionContext?.persistence || {}
+  const workspaceId = String(persistence.workspaceId || '').trim()
+  const imagePlanId = String(persistence.imagePlanId || '').trim()
+  const imagePlanVersionId = String(persistence.imagePlanVersionId || '').trim()
+  if (!isPersistenceEnabled() || !workspaceId || !imagePlanId || !imagePlanVersionId || !requestId) return null
+
+  const existing = await getGenerationRunByRequestId({ requestId, actor })
+  if (existing) return { ...existing, existing: true }
+
+  try {
+    const db = await getDatabaseClient()
+    const workspace = await db.productWorkspace.findFirst({
+      where: actor?.organizationId
+        ? { id: workspaceId, ...workspaceAccessScope(actor.organizationId, actor) }
+        : { id: workspaceId, deletedAt: null },
+      select: { id: true }
+    })
+    if (!workspace) return null
+    const imagePlanVersion = await db.imagePlanVersion.findFirst({
+      where: { id: imagePlanVersionId, imagePlanId, imagePlan: { strategyRun: { workspaceId } } },
+      select: { id: true }
+    })
+    if (!imagePlanVersion) return null
+
+    const run = await db.generationRun.create({
+      data: {
+        workspaceId,
+        imagePlanId,
+        imagePlanVersionId,
+        status: 'RUNNING',
+        model: model || null,
+        resolution: executionContext?.output?.resolution || null,
+        complexity: executionContext?.output?.complexity || null,
+        promptEnSnapshot: String(executionContext?.strategy?.promptEn || ''),
+        executionSnapshot: toJson(executionContext),
+        referenceAssetIds: toJson(persistence.referenceAssetIds || []),
+        requestId,
+        startedAt: new Date(),
+        createdById: actor?.userId || null
+      },
+      include: { generatedImages: { include: { asset: true } } }
+    })
+    return serializeGenerationRun(run)
+  } catch (error) {
+    if (error.code === 'P2002') {
+      const duplicate = await getGenerationRunByRequestId({ requestId, actor })
+      return duplicate
+        ? { ...duplicate, existing: true }
+        : { existing: true, status: 'CONFLICT', errorMessage: '生成请求编号已经被使用，请重新发起。' }
+    }
+    console.error('[persistence] failed to start generation run', { workspaceId, imagePlanId, message: error.message })
     return null
   }
 }

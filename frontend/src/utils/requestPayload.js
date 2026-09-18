@@ -187,6 +187,9 @@ function buildExecutionStrategyContext(plan = {}) {
     copy: normalizedPlan.copy,
     databasePlanId: normalizedPlan.databasePlanId,
     databasePlanVersionId: normalizedPlan.databasePlanVersionId,
+    layoutTemplateId: normalizedPlan.layoutTemplateId,
+    layoutTemplateName: normalizedPlan.layoutTemplateName,
+    layoutTemplateUrl: normalizedPlan.layoutTemplateUrl,
     regenerationMode: normalizedPlan.regenerationMode ? true : undefined
   })
 }
@@ -233,6 +236,8 @@ export function buildAnalyzeRequest(listing = {}, referenceImages = [], primaryR
     targetAudience: listing.targetAudience || parsedSections.targetAudience,
     complexity: listing.complexity || 'L2',
     selectedImageTasks,
+    layoutTemplateIds: (listing.layoutTemplates || []).map((template) => template.id).filter(Boolean),
+    analysisRevision: Number(listing._meta?.analysisRevision || 0),
     referenceImages,
     primaryReferenceImageUrl,
     referenceImageRoles,
@@ -260,6 +265,9 @@ export function buildPlanPayload(plan = {}) {
     copy: normalizedPlan.copy,
     databasePlanId: normalizedPlan.databasePlanId,
     databasePlanVersionId: normalizedPlan.databasePlanVersionId,
+    layoutTemplateId: normalizedPlan.layoutTemplateId,
+    layoutTemplateName: normalizedPlan.layoutTemplateName,
+    layoutTemplateUrl: normalizedPlan.layoutTemplateUrl,
     regenerationMode: normalizedPlan.regenerationMode ? true : undefined
   })
 }
@@ -278,6 +286,14 @@ export function buildGenerateRequest(
     primaryReferenceImageUrl,
     regenerationReferenceImages
   )
+  const normalizedPlan = normalizeImagePlan(plan)
+  const templateUrl = normalizedPlan.taskType === 'main' ? '' : normalizedPlan.layoutTemplateUrl
+  const executionReferenceImages = templateUrl && !referenceImages.includes(templateUrl)
+    ? [...referenceImages, templateUrl]
+    : referenceImages
+  const executionReferenceImageRoles = templateUrl
+    ? [...referenceImageRoles.filter((item) => item.url !== templateUrl), { url: templateUrl, role: 'layout_style_reference' }]
+    : referenceImageRoles
 
   return compactObject({
     executionContext: {
@@ -285,8 +301,8 @@ export function buildGenerateRequest(
       strategy: buildExecutionStrategyContext(plan),
       references: compactObject({
         primaryReferenceImageUrl,
-        referenceImages,
-        referenceImageRoles
+        referenceImages: executionReferenceImages,
+        referenceImageRoles: executionReferenceImageRoles
       }),
       output: compactObject({
         resolution,

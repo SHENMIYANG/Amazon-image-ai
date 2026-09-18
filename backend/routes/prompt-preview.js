@@ -4,6 +4,18 @@ import { persistImagePlanVersion } from '../services/persistence/workbenchReposi
 
 const router = express.Router()
 
+export function buildPromptPreviewSuccessResponse({ promptZh, promptEn, executionPromptEn, persistence, persistenceRequired = false }) {
+  const persistenceWarning = persistenceRequired && !persistence
+    ? '英文执行稿已生成，但策略版本保存失败。当前执行稿仍可使用，生成记录可能不完整。'
+    : ''
+
+  return {
+    success: true,
+    data: { promptZh, promptEn, executionPromptEn, persistence },
+    persistenceWarning: persistenceWarning || undefined
+  }
+}
+
 router.post('/', async (req, res) => {
   try {
     const { listing, plan, resolution, persistence } = req.body || {}
@@ -39,22 +51,13 @@ router.post('/', async (req, res) => {
       actor: req.auth
     })
 
-    if (req.auth && !persistedVersion) {
-      return res.status(500).json({
-        error: 'Persistence failed',
-        message: '英文执行稿已生成，但策略版本保存失败。请检查数据库后重试。'
-      })
-    }
-
-    res.json({
-      success: true,
-      data: {
-        promptZh: normalizedPlan.originalPrompt || strategyContent,
-        promptEn,
-        executionPromptEn,
-        persistence: persistedVersion
-      }
-    })
+    res.json(buildPromptPreviewSuccessResponse({
+      promptZh: normalizedPlan.originalPrompt || strategyContent,
+      promptEn,
+      executionPromptEn,
+      persistence: persistedVersion,
+      persistenceRequired: Boolean(req.auth)
+    }))
   } catch (error) {
     console.error('Prompt preview error:', error.response?.data || error.message)
     res.status(500).json({

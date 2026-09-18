@@ -72,6 +72,8 @@ export default function AgentAnalyzer({
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [successMessage, setSuccessMessage] = useState(null)
   const timerRef = useRef(null)
+  const latestAnalysisRevisionRef = useRef(Number(listing._meta?.analysisRevision || 0))
+  latestAnalysisRevisionRef.current = Number(listing._meta?.analysisRevision || 0)
   const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
 
   useEffect(() => {
@@ -114,6 +116,7 @@ export default function AgentAnalyzer({
     onAnalyzingChange?.(true)
     setError(null)
     setSuccessMessage(null)
+    const requestedAnalysisRevision = Number(listing._meta?.analysisRevision || 0)
 
     try {
       let uploadedReferenceImages = referenceImages
@@ -139,9 +142,13 @@ export default function AgentAnalyzer({
 
       const explicitPrimaryReferenceImageUrl = primaryReferenceImageUrl || uploadedReferenceImages[0] || ''
       const result = await requestAnalysis(listing, uploadedReferenceImages, explicitPrimaryReferenceImageUrl)
+      if (latestAnalysisRevisionRef.current !== requestedAnalysisRevision) {
+        setSuccessMessage('分析期间产品资料发生了变化，本次旧策略未写入页面。请重新生成策略。')
+        return
+      }
       onAnalyzeComplete(result.data)
 
-      setSuccessMessage(`策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图补全详细方案。`)
+      setSuccessMessage(result.persistenceWarning || `策略生成成功，AI 已为 ${result.data?.imagePlans?.length || selectedImageCount} 张图补全详细方案。`)
     } catch (err) {
       console.error('Agent 分析失败:', err)
       const message = formatApiError(err, '策略分析')

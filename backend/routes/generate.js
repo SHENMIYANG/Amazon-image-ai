@@ -14,11 +14,23 @@ import {
 import { postJsonWithRetry } from '../utils/upstreamRetry.js'
 import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
 import { materializeAssetUrls, writeAsset } from '../services/storage.js'
-import { persistGenerationResult } from '../services/persistence/workbenchRepository.js'
+import {
+  assertAccessibleAssetUrls,
+  beginGenerationRun,
+  getGenerationRunByRequestId,
+  persistGenerationResult
+} from '../services/persistence/workbenchRepository.js'
 
 const router = express.Router()
 const strategyTranslationCache = new Map()
 const MAX_TRANSLATION_CACHE_ENTRIES = 200
+
+function getGenerationRequestId(req) {
+  const provided = String(req.get('X-Generation-Request-Id') || '').trim()
+  return /^[A-Za-z0-9_-]{12,100}$/.test(provided)
+    ? provided
+    : `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
+}
 
 function getMaxReferenceImages() {
   const configuredLimit = Number(process.env.IMAGE_MAX_REFERENCE_IMAGES || 8)
@@ -42,10 +54,21 @@ export function buildGenerationSuccessResponse({ images, persistence, persistenc
   return response
 }
 
+router.get('/status/:requestId', async (req, res, next) => {
+  try {
+    const run = await getGenerationRunByRequestId({ requestId: req.params.requestId, actor: req.auth })
+    if (!run) return res.status(404).json({ success: false, status: 'NOT_FOUND', message: '没有找到这次生成请求。' })
+    res.json({ success: true, run })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/', async (req, res) => {
-  const generationRequestId = `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
+  const generationRequestId = getGenerationRequestId(req)
   const startedAt = Date.now()
   let cleanupReferenceFiles = async () => {}
+  let activeGenerationRunId = null
   try {
     const {
       listing,
@@ -135,6 +158,7 @@ router.post('/', async (req, res) => {
     let refImagePaths = []
     let orderedReferenceRoles = []
     if (hasReferenceImages) {
+      await assertAccessibleAssetUrls({ urls: executionReferenceImages, actor: req.auth })
       const roleByUrl = new Map(
         (Array.isArray(executionReferenceImageRoles) ? executionReferenceImageRoles : [])
           .filter((item) => item?.url)
@@ -147,11 +171,18 @@ router.post('/', async (req, res) => {
       const referencePriority = (imageUrl) => {
         if (imageUrl === explicitPrimaryReferenceImageUrl) return 0
         if (roleByUrl.get(imageUrl) === 'regeneration_reference') return 1
+        if (roleByUrl.get(imageUrl) === 'layout_style_reference') return 3
         return 2
       }
-      const orderedReferenceImages = candidateReferenceImages
+      const maxReferenceImages = getMaxReferenceImages()
+      const layoutReferenceImages = candidateReferenceImages.filter((imageUrl) => roleByUrl.get(imageUrl) === 'layout_style_reference')
+      const nonLayoutReferenceImages = candidateReferenceImages
+        .filter((imageUrl) => roleByUrl.get(imageUrl) !== 'layout_style_reference')
         .sort((left, right) => referencePriority(left) - referencePriority(right))
-        .slice(0, getMaxReferenceImages())
+      const orderedReferenceImages = [
+        ...nonLayoutReferenceImages.slice(0, Math.max(0, maxReferenceImages - layoutReferenceImages.length)),
+        ...layoutReferenceImages.slice(0, maxReferenceImages)
+      ]
 
       const materializedReferences = await materializeAssetUrls(orderedReferenceImages)
       refImagePaths = materializedReferences.paths
@@ -169,6 +200,45 @@ router.post('/', async (req, res) => {
         })
       }
     }
+
+    const startedRun = await beginGenerationRun({
+      executionContext,
+      model,
+      requestId: generationRequestId,
+      actor: req.auth
+    })
+    if (req.auth && !startedRun) {
+      return res.status(503).json({
+        success: false,
+        status: 'PERSISTENCE_UNAVAILABLE',
+        requestId: generationRequestId,
+        message: '生成记录暂时无法创建，本次未调用图片模型。请稍后重试。'
+      })
+    }
+    if (startedRun?.existing) {
+      if (startedRun.status === 'SUCCEEDED' && startedRun.images?.length) {
+        return res.json(buildGenerationSuccessResponse({
+          images: startedRun.images.map((image) => ({
+            ...image,
+            imageId: executionPlans[0]?.id,
+            name: executionPlans[0]?.name,
+            taskType: executionPlans[0]?.taskType
+          })),
+          persistence: { generationRunId: startedRun.id },
+          persistenceRequired: Boolean(req.auth)
+        }))
+      }
+      const isTerminalConflict = ['FAILED', 'CONFLICT', 'SUCCEEDED'].includes(startedRun.status)
+      return res.status(isTerminalConflict ? 409 : 202).json({
+        success: false,
+        status: startedRun.status,
+        requestId: generationRequestId,
+        message: isTerminalConflict
+          ? startedRun.errorMessage || '这次生成已经失败，请重新发起。'
+          : '这张图片仍在服务器生成，请等待完成。'
+      })
+    }
+    activeGenerationRunId = startedRun?.id || null
 
     const generatedImages = []
 
@@ -263,6 +333,7 @@ router.post('/', async (req, res) => {
       model,
       requestId: generationRequestId,
       durationMs: Date.now() - startedAt,
+      generationRunId: activeGenerationRunId,
       actor: req.auth
     })
 
@@ -273,6 +344,18 @@ router.post('/', async (req, res) => {
     }))
   } catch (error) {
     console.error('Generate error:', error.response?.data || error.message)
+
+    if (activeGenerationRunId) {
+      await persistGenerationResult({
+        executionContext: req.body?.executionContext,
+        images: [{ status: 'failed', error: error.message }],
+        model: process.env.IMAGE_GENERATION_MODEL || process.env.OPENAI_MODEL,
+        requestId: generationRequestId,
+        durationMs: Date.now() - startedAt,
+        generationRunId: activeGenerationRunId,
+        actor: req.auth
+      })
+    }
 
     if (error.response) {
       res.status(error.response.status).json({

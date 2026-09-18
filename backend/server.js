@@ -14,10 +14,12 @@ import authRoutes from './routes/auth.js'
 import memberRoutes from './routes/members.js'
 import activityRoutes from './routes/activity.js'
 import assetRoutes from './routes/assets.js'
+import templateRoutes from './routes/templates.js'
 import { cleanupExpiredUploads, ensureUploadsDir, UPLOADS_DIR } from './utils/uploads.js'
 import { ensureBootstrapAdmin } from './services/auth/bootstrap.js'
 import { authenticateRequest, requirePermission } from './services/auth/middleware.js'
 import { isAuthEnabled } from './services/auth/session.js'
+import { concurrencyLimit, rateLimit } from './services/security/requestLimits.js'
 
 dotenv.config()
 
@@ -28,6 +30,11 @@ const app = express()
 const PORT = process.env.BACKEND_PORT || 3001
 const NODE_ENV = process.env.NODE_ENV || 'development'
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '4mb'
+const BACKEND_HOST = process.env.BACKEND_HOST || '127.0.0.1'
+const modelRequestRateLimit = rateLimit({ name: 'model', max: 16, windowMs: 10 * 60 * 1000, key: (req) => req.auth?.userId || req.ip })
+const modelRequestConcurrencyLimit = concurrencyLimit({ name: 'model', max: 1 })
+
+app.set('trust proxy', 'loopback')
 
 // Middleware
 if (NODE_ENV !== 'production') {
@@ -40,15 +47,23 @@ app.use(express.json({ limit: JSON_BODY_LIMIT }))
 // Routes
 app.use('/api/auth', authRoutes)
 app.use('/api/upload', authenticateRequest, requirePermission('product:write'), uploadRoutes)
-app.use('/api/generate', authenticateRequest, requirePermission('image:generate'), generateRoutes)
+app.use(
+  '/api/generate',
+  authenticateRequest,
+  requirePermission('image:generate'),
+  (req, res, next) => req.method === 'GET' ? next() : modelRequestRateLimit(req, res, next),
+  (req, res, next) => req.method === 'GET' ? next() : modelRequestConcurrencyLimit(req, res, next),
+  generateRoutes
+)
 app.use('/api/test-api-key', authenticateRequest, requirePermission('member:manage'), testApiKeyRoutes)
-app.use('/api/agent-analyze', authenticateRequest, requirePermission('strategy:generate'), agentAnalyzeRoutes)
+app.use('/api/agent-analyze', authenticateRequest, requirePermission('strategy:generate'), modelRequestRateLimit, modelRequestConcurrencyLimit, agentAnalyzeRoutes)
 app.use('/api/prompt-preview', authenticateRequest, requirePermission('strategy:edit'), promptPreviewRoutes)
-app.use('/api/image-feedback', authenticateRequest, requirePermission('chat:use'), imageFeedbackRoutes)
-app.use('/api/workspace-chat', authenticateRequest, requirePermission('chat:use'), workspaceChatRoutes)
+app.use('/api/image-feedback', authenticateRequest, requirePermission('chat:use'), modelRequestRateLimit, modelRequestConcurrencyLimit, imageFeedbackRoutes)
+app.use('/api/workspace-chat', authenticateRequest, requirePermission('chat:use'), modelRequestRateLimit, modelRequestConcurrencyLimit, workspaceChatRoutes)
 app.use('/api/members', authenticateRequest, requirePermission('member:manage'), memberRoutes)
 app.use('/api/activity', authenticateRequest, requirePermission('activity:read_self'), activityRoutes)
 app.use('/api/assets', authenticateRequest, assetRoutes)
+app.use('/api/templates', authenticateRequest, requirePermission('template:read'), templateRoutes)
 
 // Local files stay public only for database-free development.
 ensureUploadsDir()
@@ -95,7 +110,7 @@ app.use((err, req, res, next) => {
 
 await ensureBootstrapAdmin()
 
-app.listen(PORT, () => {
+app.listen(PORT, BACKEND_HOST, () => {
   console.log(`🚀 Backend server running on port ${PORT}`)
   console.log(`📡 Health check: http://localhost:${PORT}/api/health`)
   console.log(`📁 Upload directory: http://localhost:${PORT}/uploads`)

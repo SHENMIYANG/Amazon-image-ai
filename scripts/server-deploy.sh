@@ -7,6 +7,7 @@ DOMAIN="${DOMAIN:-image.ubjhbdhsv.top}"
 APP_NAME="${APP_NAME:-ecommerce-image-gen}"
 BACKEND_PORT="${BACKEND_PORT:-3001}"
 NGINX_CONF="/etc/nginx/conf.d/${DOMAIN}.conf"
+NGINX_LIMITS_CONF="/etc/nginx/conf.d/00-amazon-image-limits.conf"
 SSL_DIR="/etc/nginx/ssl/${DOMAIN}"
 ACME_ROOT="/var/www/acme"
 
@@ -156,11 +157,44 @@ server {
     listen 80;
     server_name ${DOMAIN};
 
-    client_max_body_size 30M;
+    client_max_body_size 90M;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
     location ^~ /.well-known/acme-challenge/ {
         root ${ACME_ROOT};
         default_type "text/plain";
+    }
+
+    location = /api/auth/login {
+        limit_req zone=amazon_login_limit burst=5 nodelay;
+        limit_conn amazon_per_ip_conn 5;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location ~ ^/api/(upload|agent-analyze|generate|prompt-preview|image-feedback|workspace-chat) {
+        limit_req zone=amazon_api_limit burst=20 nodelay;
+        limit_conn amazon_per_ip_conn 5;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 960s;
+        proxy_read_timeout 960s;
     }
 
     location / {
@@ -204,10 +238,43 @@ server {
     listen 443 ssl http2;
     server_name ${DOMAIN};
 
-    client_max_body_size 30M;
+    client_max_body_size 90M;
 
     ssl_certificate ${SSL_DIR}/fullchain.pem;
     ssl_certificate_key ${SSL_DIR}/key.pem;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    location = /api/auth/login {
+        limit_req zone=amazon_login_limit burst=5 nodelay;
+        limit_conn amazon_per_ip_conn 5;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location ~ ^/api/(upload|agent-analyze|generate|prompt-preview|image-feedback|workspace-chat) {
+        limit_req zone=amazon_api_limit burst=20 nodelay;
+        limit_conn amazon_per_ip_conn 5;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 960s;
+        proxy_read_timeout 960s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:${BACKEND_PORT};
@@ -231,7 +298,16 @@ reload_nginx() {
   systemctl reload nginx
 }
 
+write_nginx_limits() {
+  cat > "$NGINX_LIMITS_CONF" <<EOF
+limit_req_zone \$binary_remote_addr zone=amazon_login_limit:10m rate=5r/m;
+limit_req_zone \$binary_remote_addr zone=amazon_api_limit:10m rate=20r/m;
+limit_conn_zone \$binary_remote_addr zone=amazon_per_ip_conn:10m;
+EOF
+}
+
 configure_nginx() {
+  write_nginx_limits
   if [ -f "${SSL_DIR}/fullchain.pem" ] && [ -f "${SSL_DIR}/key.pem" ]; then
     write_nginx_https
   else

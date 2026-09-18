@@ -123,7 +123,7 @@ function getImageVariants(image) {
   return variants
 }
 
-export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAll, onContinue }) {
+export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAll, onContinue, onConfirmRecovery }) {
   if (tasks.length === 0) {
     return (
       <div className="task-grid-empty">
@@ -142,13 +142,14 @@ export default function TaskGrid({ tasks, onRegenerate, onDownload, onDownloadAl
           onDownload={onDownload}
           onDownloadAll={onDownloadAll}
           onContinue={onContinue}
+          onConfirmRecovery={onConfirmRecovery}
         />
       ))}
     </div>
   )
 }
 
-function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue }) {
+function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue, onConfirmRecovery }) {
   const [previewState, setPreviewState] = useState(null)
   const [previewZoom, setPreviewZoom] = useState(1)
   const [regenerateDialog, setRegenerateDialog] = useState(null)
@@ -287,6 +288,12 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
               <span>继续</span>
             </button>
           ) : null}
+          {task.status === 'recovery_unknown' ? (
+            <button type="button" className="task-toolbar-btn" onClick={() => onConfirmRecovery?.(task)} title="检查使用记录后允许续做">
+              <Icon name="play" />
+              <span>确认后续做</span>
+            </button>
+          ) : null}
           {completedImages.length > 0 ? (
             <button type="button" className="task-toolbar-btn" onClick={() => onDownloadAll?.(completedImages)} title="下载全部图片">
               <Icon name="download" />
@@ -300,10 +307,14 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
         <span className="meta-item">分辨率 <strong>{task.resolution === '4k' ? '4K' : '2K'}</strong></span>
         <span className="meta-item">图片张数 <strong>{task.images?.length || 0}</strong></span>
         <span className="meta-item">进度 <strong className={statusClassName}>{completedImages.length}/{task.images?.length || 0}</strong></span>
-        {task.status === 'stopping' ? <span className="meta-item status-stopping">正在停止...</span> : null}
+        {task.status === 'stopping' ? <span className="meta-item status-stopping">当前图片完成后停止</span> : null}
         {task.status === 'stopped' ? <span className="meta-item status-stopped">已停止</span> : null}
         {task.status === 'failed' ? <span className="meta-item status-failed">任务失败</span> : null}
+        {task.status === 'recovering' ? <span className="meta-item status-progress">正在核对服务器</span> : null}
+        {task.status === 'recovery_unknown' ? <span className="meta-item status-stopped">等待确认</span> : null}
       </div>
+
+      {task.recoveryNotice ? <div className="regeneration-warning">{task.recoveryNotice}</div> : null}
 
       <div className="task-images-grid">
         {task.images?.length ? task.images.map((image, index) => {
@@ -318,7 +329,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                   {image.name ? <span className="image-name">{image.name}</span> : null}
                 </div>
                 <span className={`image-status status-${image.status || 'pending'}`}>
-                  {image.status === 'completed' ? '完成' : image.status === 'failed' ? '失败' : image.status === 'regenerating' ? '重新生成中' : '等待'}
+                  {image.status === 'completed' ? '完成' : image.status === 'failed' ? '失败' : image.status === 'regenerating' ? '重新生成中' : image.status === 'recovering' ? '核对中' : image.status === 'recovery_unknown' ? '待确认' : '等待'}
                 </span>
               </div>
 
@@ -376,7 +387,7 @@ function TaskCard({ task, onRegenerate, onDownload, onDownloadAll, onContinue })
                     <ActionIconButton icon="chat" label="图片反馈对话" onClick={() => openFeedbackDialog(index)} />
                   </>
                 ) : null}
-                {image.status !== 'pending' && image.status !== 'regenerating' ? (
+                {!['pending', 'generating', 'regenerating', 'recovering', 'recovery_unknown'].includes(image.status) ? (
                   <ActionIconButton icon="refresh" label="重新生成" className="regenerate" onClick={() => openRegenerateDialog(index)} />
                 ) : null}
               </div>

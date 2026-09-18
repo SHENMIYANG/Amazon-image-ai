@@ -6,7 +6,8 @@ const WORKBENCH_PERMISSIONS = [
   'image:generate',
   'chat:use',
   'image:download',
-  'activity:read_self'
+  'activity:read_self',
+  'template:read'
 ]
 
 const ROLE_PERMISSIONS = {

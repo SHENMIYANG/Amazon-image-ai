@@ -11,6 +11,7 @@ import {
   SESSION_COOKIE_NAME,
   setSessionCookie
 } from '../services/auth/session.js'
+import { rateLimit } from '../services/security/requestLimits.js'
 
 const router = express.Router()
 
@@ -32,7 +33,7 @@ router.get('/me', async (req, res, next) => {
   }
 })
 
-router.post('/login', async (req, res, next) => {
+router.post('/login', rateLimit({ name: 'login', max: 10, windowMs: 15 * 60 * 1000 }), async (req, res, next) => {
   if (!isAuthEnabled()) return unavailable(res)
   try {
     const loginName = String(req.body?.loginName || '').trim().toLowerCase()

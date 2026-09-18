@@ -138,6 +138,7 @@ function serializeDetail(workspace) {
     })),
     generationRuns: workspace.generationRuns.map((run) => ({
       id: run.id,
+      requestId: run.requestId,
       status: run.status,
       model: run.model,
       resolution: run.resolution,

@@ -6,6 +6,7 @@ import {
   normalizeAmazonMainImage
 } from './routes/generate.js'
 import {
+  bindLayoutTemplatesToTasks,
   getDistinctSellingPoints,
   getIncompleteStrategyPlanIds
 } from './routes/agent-analyze.js'
@@ -131,6 +132,43 @@ function testScenarioUsageContract() {
   assert.doesNotMatch(prompt, /RAW ADDITIONAL INFO SHOULD NOT DRIVE FINAL PROMPT/)
   assert.doesNotMatch(prompt, /support edge visibly sandwiched between two clamp jaws/)
   assert.ok(prompt.length < 6500, `scenario prompt is too long: ${prompt.length}`)
+}
+
+function testLayoutTemplateReferenceStaysSeparateFromProductTruth() {
+  const plan = normalizeStrategyPlans({
+    requestedTasks: [{
+      taskType: 'feature',
+      taskKey: 'layout-template-id',
+      name: '参考版式：信息卡',
+      layoutTemplateId: 'template-id',
+      layoutTemplateName: '信息卡',
+      layoutTemplateUrl: '/api/assets/local/template/example.png'
+    }],
+    strategyPlans: [{ strategyContent: '中文策略', promptEn: 'English prompt' }],
+    productBlueprint: {}
+  })[0]
+
+  assert.equal(plan.layoutTemplateId, 'template-id')
+  assert.equal(plan.layoutTemplateName, '信息卡')
+  assert.equal(plan.taskType, 'feature')
+}
+
+function testLayoutTemplatesBindToFeatureTasksInOrder() {
+  const tasks = [
+    { taskType: 'main', taskKey: 'main-1', name: 'Main' },
+    { taskType: 'feature', taskKey: 'feature-1', name: 'Feature 1', purpose: 'Sell', guidance: 'Prove' },
+    { taskType: 'feature', taskKey: 'feature-2', name: 'Feature 2', purpose: 'Sell', guidance: 'Prove' }
+  ]
+  const result = bindLayoutTemplatesToTasks(tasks, [
+    { id: 'a', name: 'A', imageUrl: '/a.png' },
+    { id: 'b', name: 'B', imageUrl: '/b.png' }
+  ])
+
+  assert.equal(result.length, 3)
+  assert.equal(result[1].taskKey, 'feature-1')
+  assert.equal(result[1].layoutTemplateId, 'a')
+  assert.equal(result[2].layoutTemplateId, 'b')
+  assert.throws(() => bindLayoutTemplatesToTasks(tasks, [{ id: 'a' }]), /数量必须与模板数量一致/)
 }
 
 function testGeneratedImageSizeContract() {
@@ -322,7 +360,9 @@ function testMainImageStrategyUsesAiPlanAndKeepsCompliance() {
 }
 
 await testMainImageNormalization()
-testScenarioUsageContract()
+  testScenarioUsageContract()
+  testLayoutTemplateReferenceStaysSeparateFromProductTruth()
+testLayoutTemplatesBindToFeatureTasksInOrder()
 testGeneratedImageSizeContract()
 testStrategyContractAndInputDeduplication()
 testExecutionRulesRemainVisibleWhenTheyReinforceStrategy()

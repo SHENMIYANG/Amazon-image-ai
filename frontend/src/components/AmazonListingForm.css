@@ -429,6 +429,7 @@
 
 .image-task-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.7rem;
@@ -806,6 +807,38 @@
   display: flex;
   justify-content: flex-end;
   margin-top: 0.55rem;
+}
+
+.image-plan-template-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #1e3a8a;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.image-plan-template-reference img {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.image-plan-persistence-warning {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #f1c66a;
+  border-radius: 6px;
+  background: #fff8e6;
+  color: #7a4b00;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .image-plan-save-btn {

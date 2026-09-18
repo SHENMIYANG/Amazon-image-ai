@@ -9,6 +9,7 @@ import {
   normalizeImageTaskConfig
 } from '../utils/imageTasks'
 import './AmazonListingForm.css'
+import LayoutTemplatePicker from './LayoutTemplatePicker'
 
 function InlineHelpTip({ content, width = '260px' }) {
   return (
@@ -81,6 +82,7 @@ export default function AmazonListingForm({
   onChange,
   analyzer,
   mode = 'full',
+  isAdmin = false,
   onSaveStrategyTranslation,
   savingStrategyTranslations = {}
 }) {
@@ -103,11 +105,11 @@ export default function AmazonListingForm({
     // it here can replace cards while the operator is reviewing the strategy.
     if (listing._meta?.generatedAt) return
 
-    const nextPlans = buildDefaultPlansFromTasks(normalizedTaskConfig, imagePlans)
+    const nextPlans = buildDefaultPlansFromTasks(normalizedTaskConfig, imagePlans, listing.layoutTemplates)
     if (plansSignature(imagePlans) !== plansSignature(nextPlans)) {
       onChange('imagePlans', nextPlans)
     }
-  }, [showStrategySection, normalizedTaskConfig, imagePlans, onChange])
+  }, [showStrategySection, normalizedTaskConfig, imagePlans, listing.layoutTemplates, onChange])
 
   const handleImagePlanChange = (taskKey, prompt) => {
     onChange(
@@ -148,9 +150,12 @@ export default function AmazonListingForm({
   }
 
   const handleTaskCountChange = (taskType, nextCount) => {
+    if (taskType === 'feature' && listing.layoutTemplates?.length) return
+    const otherTaskCount = selectedTaskCount - (normalizedTaskConfig[taskType] || 0)
+    const maxCount = Math.min(taskType === 'feature' ? 8 : 6, 16 - otherTaskCount)
     onChange('selectedImageTasks', {
       ...normalizedTaskConfig,
-      [taskType]: Math.max(0, Math.min(6, nextCount))
+      [taskType]: Math.max(0, Math.min(maxCount, nextCount))
     })
   }
 
@@ -268,6 +273,7 @@ export default function AmazonListingForm({
             <div className="image-task-list">
               {IMAGE_TASK_OPTIONS.map((option) => {
                 const count = normalizedTaskConfig[option.type] || 0
+                const templateLocked = option.type === 'feature' && Boolean(listing.layoutTemplates?.length)
 
                 return (
                   <div key={option.type} className="image-task-row">
@@ -282,7 +288,7 @@ export default function AmazonListingForm({
                       <button
                         type="button"
                         onClick={() => handleTaskCountChange(option.type, count - 1)}
-                        disabled={count <= 0}
+                        disabled={count <= 0 || templateLocked}
                       >
                         -
                       </button>
@@ -290,11 +296,19 @@ export default function AmazonListingForm({
                       <button
                         type="button"
                         onClick={() => handleTaskCountChange(option.type, count + 1)}
-                        disabled={count >= 6}
+                        disabled={count >= (option.type === 'feature' ? 8 : 6) || templateLocked || selectedTaskCount >= 16}
                       >
                         +
                       </button>
                     </div>
+                    {option.type === 'feature' && (
+                      <LayoutTemplatePicker
+                        selected={listing.layoutTemplates || []}
+                        onChange={(templates) => onChange('layoutTemplates', templates)}
+                        isAdmin={isAdmin}
+                        maxSelection={Math.min(8, 16 - (selectedTaskCount - count))}
+                      />
+                    )}
                   </div>
                 )
               })}
@@ -372,6 +386,17 @@ export default function AmazonListingForm({
                         <span className="image-plan-strategy-tag">中文策略正文</span>
                         <span className="strategy-english-status">{englishStatus}</span>
                       </div>
+
+                      {plan.layoutTemplateUrl ? (
+                        <div className="image-plan-template-reference">
+                          <img src={plan.layoutTemplateUrl} alt="" />
+                          <span>参考版式：{plan.layoutTemplateName}</span>
+                        </div>
+                      ) : null}
+
+                      {plan.persistenceWarning ? (
+                        <div className="image-plan-persistence-warning">{plan.persistenceWarning}</div>
+                      ) : null}
 
                       <textarea
                         value={plan.strategyContent || ''}

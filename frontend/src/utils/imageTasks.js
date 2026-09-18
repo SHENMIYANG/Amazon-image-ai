@@ -143,7 +143,7 @@ export function normalizeImageTaskConfig(config = {}) {
   return IMAGE_TASK_OPTIONS.reduce((acc, option) => {
     const rawValue = config[option.type]
     const count = Number.isFinite(Number(rawValue)) ? Number(rawValue) : base[option.type]
-    acc[option.type] = Math.max(0, Math.min(6, Math.round(count)))
+    acc[option.type] = Math.max(0, Math.min(option.type === 'feature' ? 8 : 6, Math.round(count)))
     return acc
   }, {})
 }
@@ -184,14 +184,28 @@ export function expandImageTasks(config = {}) {
   return expanded
 }
 
-export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
+export function buildDefaultPlansFromTasks(config = {}, existingPlans = [], layoutTemplates = []) {
   const existingByTaskKey = new Map(
     (existingPlans || [])
       .filter((plan) => plan?.taskKey)
       .map((plan) => [plan.taskKey, plan])
   )
 
-  return expandImageTasks(config).map((task, index) => {
+  let templateIndex = 0
+  const templates = Array.isArray(layoutTemplates) ? layoutTemplates : []
+  const tasks = expandImageTasks(config).map((task) => {
+    if (task.taskType !== 'feature' || !templates[templateIndex]) return task
+    const template = templates[templateIndex++]
+    return {
+      ...task,
+      name: `${task.name} · ${template.name}`,
+      layoutTemplateId: template.id,
+      layoutTemplateName: template.name,
+      layoutTemplateUrl: template.imageUrl
+    }
+  })
+
+  return tasks.map((task, index) => {
     const existing = existingByTaskKey.get(task.taskKey)
     const hasPlaceholderValue = existing && Object.prototype.hasOwnProperty.call(existing, 'placeholder')
 
@@ -206,7 +220,10 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
       strategyContent: '',
       placeholder: hasPlaceholderValue ? existing.placeholder : task.placeholder,
       promptEn: '',
-      promptDirty: false
+      promptDirty: false,
+      layoutTemplateId: task.layoutTemplateId || '',
+      layoutTemplateName: task.layoutTemplateName || '',
+      layoutTemplateUrl: task.layoutTemplateUrl || ''
     })
 
     // The selected task is the stable plan identity. Do not retain an old or
@@ -214,7 +231,10 @@ export function buildDefaultPlansFromTasks(config = {}, existingPlans = []) {
     return {
       ...normalizedPlan,
       id: index + 1,
-      taskKey: task.taskKey
+      taskKey: task.taskKey,
+      layoutTemplateId: task.layoutTemplateId || '',
+      layoutTemplateName: task.layoutTemplateName || '',
+      layoutTemplateUrl: task.layoutTemplateUrl || ''
     }
   })
 }

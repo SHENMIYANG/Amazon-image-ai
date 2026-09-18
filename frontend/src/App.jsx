@@ -17,6 +17,8 @@ import { buildGenerateRequest, buildListingPayload, extractProductName, parseLis
 import { buildDefaultPlansFromTasks, getDefaultImageTaskConfig, getSelectedImageTaskCount, normalizeImagePlan } from './utils/imageTasks'
 import './App.css'
 
+const TASK_STORAGE_PREFIX = 'amazon-image-studio:tasks:'
+
 function parseImageResolution(resolution) {
   if (resolution === '2k') return { width: 2048, height: 2048 }
   if (resolution === '4k') return { width: 4096, height: 4096 }
@@ -100,10 +102,26 @@ async function uploadReferenceFiles(files = [], label = '参考图上传接口')
   return data.images.map((image) => image.url)
 }
 
-async function requestGeneratedImage({ listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages = [], label }) {
+function createGenerationRequestId() {
+  const randomId = window.crypto?.randomUUID?.().replaceAll('-', '')
+    || `${Date.now()}_${Math.round(Math.random() * 1000000000)}`
+  return `generation_${randomId}`
+}
+
+async function requestGenerationStatus(requestId) {
+  const response = await fetch(`/api/generate/status/${encodeURIComponent(requestId)}`)
+  if (response.status === 404) return { status: 'NOT_FOUND' }
+  const data = await parseApiJson(response, '生成任务状态接口')
+  return data.run
+}
+
+async function requestGeneratedImage({ listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages = [], requestId, label }) {
   const generateResponse = await fetch('/api/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Generation-Request-Id': requestId
+    },
     body: JSON.stringify(buildGenerateRequest(listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages))
   })
   const data = await parseApiJson(generateResponse, label)
@@ -178,6 +196,41 @@ function buildCompletedImageState(image = {}, generatedImage = {}, fallbackPlan 
   }
 }
 
+function recoverStoredTasks(tasks = []) {
+  return (Array.isArray(tasks) ? tasks : []).map((task) => {
+    const images = (Array.isArray(task.images) ? task.images : []).map((image) => {
+      if (image.status !== 'generating' && image.status !== 'regenerating') return image
+      if (image.generationRequestId) {
+        return {
+          ...image,
+          status: 'recovering',
+          recoveryMode: image.status,
+          recoveryChecks: 0,
+          error: null,
+          regenerationError: null
+        }
+      }
+      return image.imageUrl
+        ? { ...image, status: 'completed' }
+        : { ...image, status: 'recovery_unknown', error: null, regenerationError: null }
+    })
+    const wasRunning = ['generating', 'stopping'].includes(task.status) || images.some((image, index) => image.status !== task.images?.[index]?.status)
+    const isRecovering = images.some((image) => image.status === 'recovering')
+    const hasUnknownRequest = images.some((image) => image.status === 'recovery_unknown')
+
+    return {
+      ...task,
+      images,
+      status: isRecovering ? 'recovering' : hasUnknownRequest ? 'recovery_unknown' : wasRunning ? 'stopped' : task.status,
+      recoveryNotice: isRecovering
+        ? '正在向服务器核对刷新前的生成状态，请稍候。'
+        : hasUnknownRequest
+          ? '这是旧版任务，缺少生成请求编号。请先检查使用记录，再确认是否续做。'
+        : task.recoveryNotice
+    }
+  })
+}
+
 function getPageRoute(pathname = window.location.pathname) {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/'
   const activityMatch = normalizedPath.match(/^\/activity\/([^/]+)$/)
@@ -201,7 +254,11 @@ function buildInvalidatedAnalysisState(prev, { preservePlans = true } = {}) {
     globalRules: null,
     globalConstraints: null,
     productBlueprint: null,
-    _meta: undefined,
+    _meta: {
+      ...(prev._meta || {}),
+      analysisRevision: Number(prev._meta?.analysisRevision || 0) + 1,
+      requiresReanalysis: true
+    },
     imagePlans: preservePlans ? markPlansAsStale(prev.imagePlans || []) : []
   }
 }
@@ -211,7 +268,7 @@ function normalizeTaskConfigForComparison(config = {}) {
   return Object.keys(base).reduce((acc, key) => {
     const rawValue = config?.[key]
     const count = Number.isFinite(Number(rawValue)) ? Number(rawValue) : base[key]
-    acc[key] = Math.max(0, Math.min(6, Math.round(count)))
+    acc[key] = Math.max(0, Math.min(key === 'feature' ? 8 : 6, Math.round(count)))
     return acc
   }, {})
 }
@@ -223,8 +280,8 @@ function isTaskConfigReductionOnly(previousConfig = {}, nextConfig = {}) {
   return Object.keys(prev).every((key) => next[key] <= prev[key])
 }
 
-function validateAnalyzedPlans(imagePlans = [], selectedImageTasks = {}) {
-  const expectedTaskKeys = buildDefaultPlansFromTasks(selectedImageTasks, []).map((plan) => plan.taskKey)
+function validateAnalyzedPlans(imagePlans = [], selectedImageTasks = {}, layoutTemplates = []) {
+  const expectedTaskKeys = buildDefaultPlansFromTasks(selectedImageTasks, [], layoutTemplates).map((plan) => plan.taskKey)
   const actualTaskKeys = (Array.isArray(imagePlans) ? imagePlans : []).map((plan) => String(plan?.taskKey || '').trim())
 
   const duplicateTaskKeys = actualTaskKeys.filter((taskKey, index) => taskKey && actualTaskKeys.indexOf(taskKey) !== index)
@@ -282,6 +339,7 @@ function App() {
     globalConstraints: null,
     productBlueprint: null,
     selectedImageTasks: getDefaultImageTaskConfig(),
+    layoutTemplates: [],
     imagePlans: []
   })
 
@@ -296,6 +354,8 @@ function App() {
   const [stopping, setStopping] = useState(false)
   const [currentTaskId, setCurrentTaskId] = useState(null)
   const stoppingRef = useRef(false)
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isWorkspaceChatOpen, setIsWorkspaceChatOpen] = useState(false)
   const [savingStrategyTranslations, setSavingStrategyTranslations] = useState({})
@@ -303,6 +363,7 @@ function App() {
   const [authEnabled, setAuthEnabled] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [pathname, setPathname] = useState(() => window.location.pathname)
+  const [loadedTaskOwner, setLoadedTaskOwner] = useState('')
   useEffect(() => {
     let active = true
 
@@ -335,6 +396,136 @@ function App() {
       active = false
     }
   }, [])
+
+  const taskOwnerKey = authLoading ? '' : (currentUser?.id || (!authEnabled ? 'local' : ''))
+
+  const commitTasks = (nextTasks) => {
+    tasksRef.current = nextTasks
+    setTasks(nextTasks)
+    if (!taskOwnerKey) return
+    try {
+      window.localStorage.setItem(`${TASK_STORAGE_PREFIX}${taskOwnerKey}`, JSON.stringify(nextTasks.slice(0, 20)))
+    } catch (error) {
+      console.warn('保存生成任务失败:', error)
+    }
+  }
+
+  useEffect(() => {
+    if (!taskOwnerKey || loadedTaskOwner === taskOwnerKey) return
+    const storageKey = `${TASK_STORAGE_PREFIX}${taskOwnerKey}`
+    try {
+      const storedTasks = JSON.parse(window.localStorage.getItem(storageKey) || '[]')
+      setTasks(recoverStoredTasks(storedTasks))
+    } catch (error) {
+      console.warn('恢复生成任务失败:', error)
+      setTasks([])
+    }
+    setLoadedTaskOwner(taskOwnerKey)
+  }, [loadedTaskOwner, taskOwnerKey])
+
+  useEffect(() => {
+    if (!taskOwnerKey || loadedTaskOwner !== taskOwnerKey) return
+    try {
+      window.localStorage.setItem(`${TASK_STORAGE_PREFIX}${taskOwnerKey}`, JSON.stringify(tasks.slice(0, 20)))
+    } catch (error) {
+      console.warn('保存生成任务失败:', error)
+    }
+  }, [loadedTaskOwner, taskOwnerKey, tasks])
+
+  useEffect(() => {
+    if (!loadedTaskOwner) return undefined
+    let active = true
+    let timer = null
+
+    const reconcileRunningTasks = async () => {
+      const recoveringImages = tasksRef.current.flatMap((task) =>
+        (task.images || [])
+          .filter((image) => image.status === 'recovering' && image.generationRequestId)
+          .map((image) => ({ requestId: image.generationRequestId }))
+      )
+      if (!recoveringImages.length) return
+
+      const statuses = new Map(await Promise.all(recoveringImages.map(async ({ requestId }) => {
+        try {
+          return [requestId, await requestGenerationStatus(requestId)]
+        } catch {
+          return [requestId, { status: 'UNAVAILABLE' }]
+        }
+      })))
+      if (!active) return
+
+      setTasks((previous) => previous.map((task) => {
+        let changed = false
+        const images = (task.images || []).map((image) => {
+          if (image.status !== 'recovering' || !image.generationRequestId) return image
+          const run = statuses.get(image.generationRequestId)
+          if (!run) return image
+          changed = true
+
+          if (run.status === 'SUCCEEDED' && run.images?.[0]?.imageUrl) {
+            const completedImage = buildCompletedImageState(image, run.images[0], image)
+            const previousVersion = image.recoveryMode === 'regenerating' ? buildImageVersionSnapshot(image) : null
+            return {
+              ...completedImage,
+              recoveryMode: null,
+              recoveryChecks: 0,
+              versions: previousVersion
+                ? [previousVersion, ...(Array.isArray(image.versions) ? image.versions : [])].slice(0, 8)
+                : image.versions || []
+            }
+          }
+          if (run.status === 'FAILED' || run.status === 'CANCELLED' || (run.status === 'SUCCEEDED' && !run.images?.[0]?.imageUrl)) {
+            if (image.recoveryMode === 'regenerating' && image.imageUrl) {
+              return {
+                ...image,
+                status: 'completed',
+                recoveryMode: null,
+                generationRequestId: null,
+                regenerationError: run.errorMessage || '重新生成失败，已保留原图片。'
+              }
+            }
+            return {
+              ...image,
+              status: 'failed',
+              recoveryMode: null,
+              generationRequestId: null,
+              error: run.errorMessage || '服务器没有保存这张图片，请重新生成。'
+            }
+          }
+          if (run.status === 'NOT_FOUND') {
+            const recoveryChecks = Number(image.recoveryChecks || 0) + 1
+            return recoveryChecks >= 3
+              ? { ...image, status: 'recovery_unknown', recoveryChecks }
+              : { ...image, recoveryChecks }
+          }
+          return image
+        })
+        if (!changed) return task
+
+        const isRecovering = images.some((image) => image.status === 'recovering')
+        const hasUnknownRequest = images.some((image) => image.status === 'recovery_unknown')
+        const allCompleted = images.every((image) => image.status === 'completed')
+        return {
+          ...task,
+          images,
+          status: isRecovering ? 'recovering' : hasUnknownRequest ? 'recovery_unknown' : allCompleted ? 'completed' : 'stopped',
+          recoveryNotice: isRecovering
+            ? '正在向服务器核对刷新前的生成状态，请稍候。'
+            : hasUnknownRequest
+              ? '服务器没有找到旧请求。请先检查使用记录，再确认是否续做。'
+              : null
+        }
+      }))
+
+      timer = window.setTimeout(reconcileRunningTasks, 3000)
+    }
+
+    reconcileRunningTasks()
+    return () => {
+      active = false
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [loadedTaskOwner])
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -464,6 +655,21 @@ function App() {
       return
     }
 
+    if (field === 'layoutTemplates') {
+      setListing((prev) => {
+        const templates = Array.isArray(value) ? value : []
+        return {
+          ...prev,
+          ...buildInvalidatedAnalysisState(prev),
+          layoutTemplates: templates,
+          selectedImageTasks: templates.length > 0
+            ? { ...prev.selectedImageTasks, feature: templates.length }
+            : prev.selectedImageTasks
+        }
+      })
+      return
+    }
+
     if (ANALYSIS_INVALIDATING_FIELDS.has(field)) {
       setListing((prev) => ({
         ...prev,
@@ -478,7 +684,6 @@ function App() {
 
   const handleAgentAnalyzeComplete = (analysisResult) => {
     const { imagePlans, _meta, globalRules, globalConstraints, productBlueprint } = analysisResult
-    validateAnalyzedPlans(imagePlans, listing.selectedImageTasks)
     const normalizedPlans = (imagePlans || []).map((plan) =>
       normalizeImagePlan({
         ...plan,
@@ -491,18 +696,25 @@ function App() {
       })
     )
 
-    setListing((prev) => ({
-      ...prev,
-      imagePlans: normalizedPlans,
-      globalRules: globalRules || globalConstraints || prev.globalRules || prev.globalConstraints || null,
-      globalConstraints: globalConstraints || prev.globalConstraints || null,
-      productBlueprint: productBlueprint || prev.productBlueprint || null,
-      _meta: _meta
-    }))
+    setListing((prev) => {
+      if (Number(_meta?.analysisRevision || 0) !== Number(prev._meta?.analysisRevision || 0)) return prev
+      validateAnalyzedPlans(imagePlans, prev.selectedImageTasks, prev.layoutTemplates)
+      return {
+        ...prev,
+        imagePlans: normalizedPlans,
+        globalRules: globalRules || globalConstraints || prev.globalRules || prev.globalConstraints || null,
+        globalConstraints: globalConstraints || prev.globalConstraints || null,
+        productBlueprint: productBlueprint || prev.productBlueprint || null,
+        _meta: {
+          ...(_meta || {}),
+          requiresReanalysis: false
+        }
+      }
+    })
   }
 
   const syncStrategyTranslations = async (plansOverride = null, targetPlanTaskKeys = null) => {
-    const plans = Array.isArray(plansOverride) ? plansOverride : buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
+    const plans = Array.isArray(plansOverride) ? plansOverride : buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [], listing.layoutTemplates)
     const targetTaskKeySet = Array.isArray(targetPlanTaskKeys) && targetPlanTaskKeys.length > 0 ? new Set(targetPlanTaskKeys) : null
     const dirtyPlans = plans.filter(
       (plan) =>
@@ -546,7 +758,10 @@ function App() {
         const data = await parseApiJson(response, `策略英文执行稿接口（图${plan.id}）`)
         translatedByTaskKey.set(plan.taskKey, {
           promptEn: data.data?.promptEn || '',
-          databasePlanVersionId: data.data?.persistence?.imagePlanVersionId || plan.databasePlanVersionId
+          databasePlanVersionId: data.persistenceWarning
+            ? null
+            : data.data?.persistence?.imagePlanVersionId || plan.databasePlanVersionId,
+          persistenceWarning: data.persistenceWarning || ''
         })
       }
 
@@ -556,6 +771,7 @@ function App() {
               ...plan,
               promptEn: translatedByTaskKey.get(plan.taskKey).promptEn,
               databasePlanVersionId: translatedByTaskKey.get(plan.taskKey).databasePlanVersionId,
+              persistenceWarning: translatedByTaskKey.get(plan.taskKey).persistenceWarning,
               promptDirty: false
             }
           : plan
@@ -573,6 +789,7 @@ function App() {
             ...currentPlan,
             promptEn: contentChangedDuringSave ? '' : translatedPlan.promptEn,
             databasePlanVersionId: contentChangedDuringSave ? currentPlan.databasePlanVersionId : translatedPlan.databasePlanVersionId,
+            persistenceWarning: contentChangedDuringSave ? currentPlan.persistenceWarning : translatedPlan.persistenceWarning,
             promptDirty: contentChangedDuringSave
           }
         })
@@ -595,12 +812,16 @@ function App() {
 
   const handleGenerate = async () => {
     if (generating) return
+    if (listing._meta?.requiresReanalysis) {
+      alert('产品资料、产品图、任务或模板已经变化。请重新生成策略后再生图。')
+      return
+    }
     setGenerating(true)
     setStopping(false)
     stoppingRef.current = false
 
-    let allPlans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
-    const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
+    let allPlans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [], listing.layoutTemplates)
+    const selectedImageCount = allPlans.length
 
     if (selectedImageCount === 0 || allPlans.length === 0) {
       alert('请先选择至少 1 张要生成的图片任务。')
@@ -635,12 +856,14 @@ function App() {
       images: allPlans.map((plan) => {
         const normalizedPlan = normalizeImagePlan(plan)
         return {
+          ...normalizedPlan,
           imageId: normalizedPlan.id,
           databasePlanId: normalizedPlan.databasePlanId,
           databasePlanVersionId: normalizedPlan.databasePlanVersionId,
           name: normalizedPlan.name,
           taskType: normalizedPlan.taskType,
           status: 'pending',
+          generationRequestId: null,
           imageUrl: null,
           imageRole: normalizedPlan.imageRole,
           sellingFocus: normalizedPlan.sellingFocus,
@@ -650,6 +873,7 @@ function App() {
           strategyContent: normalizedPlan.strategyContent,
           promptEn: normalizedPlan.promptEn,
           promptDirty: normalizedPlan.promptDirty,
+          persistenceWarning: normalizedPlan.persistenceWarning || null,
           versions: [],
           regenerationError: null,
           error: null,
@@ -662,7 +886,7 @@ function App() {
       createdAt: new Date().toISOString()
     }
 
-    setTasks((prev) => [newTask, ...prev])
+    commitTasks([newTask, ...tasksRef.current])
 
     try {
       let referenceImages = uploadedReferenceImages
@@ -713,12 +937,15 @@ function App() {
           break
         }
 
-        setTasks((prev) =>
-          prev.map((task) => {
+        const generationRequestId = createGenerationRequestId()
+        commitTasks(
+          tasksRef.current.map((task) => {
             if (task.id === taskId) {
               return {
                 ...task,
-                images: task.images.map((img) => (img.imageId === plan.id ? { ...img, status: 'generating' } : img))
+                images: task.images.map((img) => (
+                  img.imageId === plan.id ? { ...img, status: 'generating', generationRequestId } : img
+                ))
               }
             }
             return task
@@ -732,6 +959,7 @@ function App() {
             resolution: selectedResolution,
             referenceImages,
             primaryReferenceImageUrl,
+            requestId: generationRequestId,
             label: `图片生成接口（图${plan.id}）`
           })
 
@@ -767,8 +995,9 @@ function App() {
                           ...img,
                           status: 'failed',
                           name: img.name,
-                          taskType: img.taskType,
-                          error: error.message
+                           taskType: img.taskType,
+                           generationRequestId: null,
+                           error: error.message
                         }
                       : img
                   )
@@ -838,6 +1067,9 @@ function App() {
       sellingFocus: image.sellingFocus || '',
       executionRules: providedExecutionRules || image.executionRules || [],
       copy: image.copy || [],
+      layoutTemplateId: image.layoutTemplateId || '',
+      layoutTemplateName: image.layoutTemplateName || '',
+      layoutTemplateUrl: image.layoutTemplateUrl || '',
       databasePlanId: options.databasePlanId || image.databasePlanId,
       databasePlanVersionId: options.databasePlanVersionId || image.databasePlanVersionId,
       strategyContent: requestedPrompt,
@@ -855,11 +1087,12 @@ function App() {
     const hadCurrentImage = Boolean(image.imageUrl)
 
     const taskId = Date.now()
+    const generationRequestId = createGenerationRequestId()
     setCurrentTaskId(taskId)
     setGenerating(true)
 
-    setTasks((prev) =>
-      prev.map((t) => {
+    commitTasks(
+      tasksRef.current.map((t) => {
         if (t.id === task.id) {
           return {
             ...t,
@@ -868,6 +1101,7 @@ function App() {
                 return {
                   ...img,
                   status: 'regenerating',
+                  generationRequestId,
                   error: null,
                   regenerationError: null
                 }
@@ -897,6 +1131,7 @@ function App() {
         referenceImages: regenerationReferenceImages,
         primaryReferenceImageUrl,
         regenerationReferenceImages: [...providedReferenceImageUrls, ...additionalReferenceImages],
+        requestId: generationRequestId,
         label: `图片生成接口（图${image.imageId}）`
       })
 
@@ -947,8 +1182,9 @@ function App() {
                 if (idx === imageIndex) {
                   return {
                     ...img,
-                    status: hadCurrentImage ? 'completed' : 'failed',
-                    error: hadCurrentImage ? null : error.message,
+                     status: hadCurrentImage ? 'completed' : 'failed',
+                     generationRequestId: null,
+                     error: hadCurrentImage ? null : error.message,
                     regenerationError: error.message
                   }
                 }
@@ -981,6 +1217,21 @@ function App() {
     }
   }
 
+  const handleConfirmRecovery = (task) => {
+    if (!task || task.status !== 'recovery_unknown') return
+    if (!window.confirm('请先确认使用记录中没有这张图片。确认后，系统才会允许续做并产生新的生成费用。')) return
+    setTasks((previous) => previous.map((item) => item.id === task.id
+      ? {
+          ...item,
+          status: 'stopped',
+          recoveryNotice: null,
+          images: item.images.map((image) => image.status === 'recovery_unknown'
+            ? { ...image, status: 'pending', generationRequestId: null, recoveryChecks: 0 }
+            : image)
+        }
+      : item))
+  }
+
   const handleContinue = async (task) => {
     if (!task || task.status !== 'stopped') return
     const taskId = task.id
@@ -1002,7 +1253,12 @@ function App() {
           copy: img.copy || [],
           strategyContent: img.strategyContent || '',
           promptEn: img.promptEn,
-          promptDirty: img.promptDirty
+          promptDirty: img.promptDirty,
+          databasePlanId: img.databasePlanId,
+          databasePlanVersionId: img.databasePlanVersionId,
+          layoutTemplateId: img.layoutTemplateId || '',
+          layoutTemplateName: img.layoutTemplateName || '',
+          layoutTemplateUrl: img.layoutTemplateUrl || ''
         })
       )
 
@@ -1013,8 +1269,8 @@ function App() {
 
     setGenerating(true)
 
-    setTasks((prev) =>
-      prev.map((t) => {
+    commitTasks(
+      tasksRef.current.map((t) => {
         if (t.id === task.id) {
           return { ...t, status: 'generating' }
         }
@@ -1043,12 +1299,15 @@ function App() {
         break
       }
 
-      setTasks((prev) =>
-        prev.map((t) => {
+      const generationRequestId = createGenerationRequestId()
+      commitTasks(
+        tasksRef.current.map((t) => {
           if (t.id === task.id) {
             return {
               ...t,
-              images: t.images.map((img) => (img.imageId === plan.id ? { ...img, status: 'generating' } : img))
+              images: t.images.map((img) => (
+                img.imageId === plan.id ? { ...img, status: 'generating', generationRequestId } : img
+              ))
             }
           }
           return t
@@ -1062,6 +1321,7 @@ function App() {
           resolution: task.resolution,
           referenceImages,
           primaryReferenceImageUrl,
+          requestId: generationRequestId,
           label: `图片生成接口（图${plan.id}）`
         })
 
@@ -1095,6 +1355,7 @@ function App() {
                     ? {
                         ...img,
                         status: 'failed',
+                        generationRequestId: null,
                         error: error.message
                       }
                     : img
@@ -1130,7 +1391,7 @@ function App() {
   }
 
   const handleSaveStrategyTranslationForPlan = async (taskKey, planSnapshot) => {
-    const currentPlans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [])
+    const currentPlans = buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [], listing.layoutTemplates)
     const snapshot = planSnapshot || currentPlans.find((plan) => plan.taskKey === taskKey)
     if (!snapshot) return
 
@@ -1195,7 +1456,7 @@ function App() {
       alert('批量下载失败：' + error.message)
     }
   }
-  const canGenerate = (listing.productName || listing.listingInfo) && productImages.length > 0
+  const canGenerate = (listing.productName || listing.listingInfo) && productImages.length > 0 && !listing._meta?.requiresReanalysis
   const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
   const pageRoute = getPageRoute(pathname)
 
@@ -1279,7 +1540,7 @@ function App() {
               <div className="panel-heading">
                 <h2>商品输入与偏好</h2>
               </div>
-              <AmazonListingForm listing={listing} onChange={handleListingChange} mode="product" />
+              <AmazonListingForm listing={listing} onChange={handleListingChange} mode="product" isAdmin={currentUser?.role === 'ADMIN'} />
             </section>
           </div>
 
@@ -1292,6 +1553,7 @@ function App() {
                 listing={listing}
                 onChange={handleListingChange}
                 mode="strategy"
+                isAdmin={currentUser?.role === 'ADMIN'}
                 onSaveStrategyTranslation={handleSaveStrategyTranslationForPlan}
                 savingStrategyTranslations={savingStrategyTranslations}
                 analyzer={
@@ -1328,7 +1590,8 @@ function App() {
                     stopping={stopping}
                     imageCount={selectedImageCount}
                   />
-                  {!canGenerate && <div className="generate-hint">请先上传产品图片，并填写产品信息后再开始生成。</div>}
+                  {!canGenerate && !listing._meta?.requiresReanalysis && <div className="generate-hint">请先上传产品图片，并填写产品信息后再开始生成。</div>}
+                  {listing._meta?.requiresReanalysis && <div className="generate-hint">产品资料、产品图、任务或模板已变化，请重新生成策略。</div>}
                   {canGenerate && selectedImageCount === 0 && <div className="generate-hint">请先在中间区域选择要生成的图片类型和张数。</div>}
                 </div>
               </div>
@@ -1344,6 +1607,7 @@ function App() {
                 onDownload={handleDownload}
                 onDownloadAll={handleDownloadAll}
                 onContinue={handleContinue}
+                onConfirmRecovery={handleConfirmRecovery}
               />
             </section>
           </div>

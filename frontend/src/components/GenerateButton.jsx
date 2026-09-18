@@ -19,8 +19,8 @@ export default function GenerateButton({
           <button type="button" className="generate-button generating" disabled>
             {'\u23F3'} 生成中...
           </button>
-          <button type="button" className="stop-button" onClick={onStop} disabled={stopping}>
-            {'\u23F9\uFE0F'} 停止生成
+          <button type="button" className="stop-button" onClick={onStop} disabled={stopping} title="当前图片会继续完成，只停止后续图片">
+            {'\u23F9\uFE0F'} {stopping ? '等待当前图片完成' : '停止后续图片'}
           </button>
         </>
       )}

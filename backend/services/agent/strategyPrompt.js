@@ -151,8 +151,9 @@ export function buildStrategyPrompts({
       `Task type: ${item.taskType}`,
       `Purpose: ${item.purpose}`,
       `Guidance: ${item.guidance}`,
+      item.layoutTemplateName ? `Selling-point reference template: ${item.layoutTemplateName}` : '',
       'Required planning lens: decide the buyer question, the visible evidence, the minimal copy, and the misunderstanding boundary for this shot.'
-    ].join('\n'))
+    ].filter(Boolean).join('\n'))
     .join('\n\n')
 
   const systemPrompt = `
@@ -209,6 +210,7 @@ Hard rules:
 19. Do not make gift boxes, storage boxes, ribbons, cards, packaging, organizers, props, or display containers the image mission unless the user explicitly says they are included or required. If they are only scene props, state that they are props and must not be understood as included accessories.
 20. Supplied dimensions and explicitly named included items are confirmed facts. Do not alter, estimate, expand, or invent their values. If a requested image needs a fact that is not supplied or clearly visible in a reference image, omit that fact instead of guessing.
 21. strategyContent must contain Chinese. promptEn must contain the English execution version. Never substitute the marketplace language for strategyContent.
+22. When a feature plan has a selling-point reference template, analyze that template's composition, information hierarchy, and visual proof method. Transfer those methods to the real product, but never copy competitor branding, exact copy, product appearance, or unsupported facts.
 
 ${visualMarketingMethodology}
 
