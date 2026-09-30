@@ -19,6 +19,7 @@ import { getDatabaseClient } from '../services/persistence/client.js'
 import { buildAssetUrl } from '../services/storage.js'
 
 const router = express.Router()
+const MAX_STRATEGY_REFERENCE_IMAGES = 16
 
 export function applyStrategyPersistenceResult(responseData = {}, persistence = null, persistenceRequired = false) {
   const nextData = {
@@ -255,7 +256,9 @@ async function getSelectedLayoutTemplates(ids = [], actor = null) {
   if (templateIds.length === 0) return []
   const db = await getDatabaseClient()
   if (!db || !actor?.organizationId) throw createAgentAnalyzeError({ stage: 'layout_templates', status: 503, message: '公共模板暂不可用。' })
-  const templates = await db.layoutTemplate.findMany({
+  let templates
+  try {
+    templates = await db.layoutTemplate.findMany({
     where: {
       id: { in: templateIds },
       organizationId: actor.organizationId,
@@ -266,7 +269,16 @@ async function getSelectedLayoutTemplates(ids = [], actor = null) {
       ]
     },
     include: { asset: true }
-  })
+    })
+  } catch (error) {
+    throw createAgentAnalyzeError({
+      stage: 'layout_templates', status: 503,
+      message: error.code === 'P2021' || error.code === 'P2022'
+        ? '模板数据库结构未更新，请在 backend 目录执行 npm run db:migrate:deploy 和 npm run db:generate，再重启后端。'
+        : '模板数据库读取失败，请检查数据库连接和后端日志。',
+      cause: error
+    })
+  }
   if (templates.length !== templateIds.length) throw createAgentAnalyzeError({ stage: 'layout_templates', status: 403, message: '所选模板不存在或已归档。' })
   const byId = new Map(templates.map((template) => [template.id, template]))
   return templateIds.map((id) => {
@@ -316,7 +328,7 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
     }
   })
 
-  for (const [index, imageUrl] of orderedReferenceImages.slice(0, 16).entries()) {
+  for (const [index, imageUrl] of orderedReferenceImages.entries()) {
     const reference = getAssetReferenceFromUrl(imageUrl)
     if (!reference) continue
 
@@ -345,8 +357,23 @@ async function buildImageContentParts(primaryReferenceImageUrl = '', referenceIm
   return contentParts
 }
 
-function parseCompletionJson(completion, label) {
+export function getStrategyReferenceImages(referenceImages = [], layoutTemplates = []) {
+  const productImages = Array.isArray(referenceImages) ? referenceImages.filter(Boolean) : []
+  const templateImages = layoutTemplates.map((template) => template.imageUrl).filter(Boolean)
+  const images = [...new Set([...productImages, ...templateImages])]
+  if (images.length > MAX_STRATEGY_REFERENCE_IMAGES) {
+    throw createAgentAnalyzeError({
+      stage: 'reference_images',
+      status: 400,
+      message: `产品图 ${productImages.length} 张、模板 ${templateImages.length} 张，合计最多 ${MAX_STRATEGY_REFERENCE_IMAGES} 张；请减少图片后重试。`
+    })
+  }
+  return images
+}
+
+export function parseCompletionJson(completion, label) {
   let rawContent = completion?.choices?.[0]?.message?.content || ''
+  if (typeof rawContent !== 'string') throw new Error(`${label} returned non-text content`)
   rawContent = rawContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
 
   const firstBrace = rawContent.indexOf('{')
@@ -419,6 +446,7 @@ router.post('/', async (req, res) => {
       requestId,
       selectedTaskCount: Array.isArray(selectedImageTasks) ? selectedImageTasks.length : 0,
       referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0,
+      requestedTemplateCount: Array.isArray(layoutTemplateIds) ? layoutTemplateIds.length : 0,
       productNameChars: String(productName || '').length,
       listingInfoChars: String(listingInfo || '').length,
       additionalInfoChars: String(additionalInfo || '').length,
@@ -480,10 +508,10 @@ router.post('/', async (req, res) => {
     const brandColorLabel = getBrandColorLabel(brandColorMode, brandColor)
     const complexityDefinition = getAgentComplexityDefinition(complexity)
 
+    const templateReferenceImages = layoutTemplates.map((template) => template.imageUrl)
+    const strategyReferenceImages = getStrategyReferenceImages(referenceImages, layoutTemplates)
     let imageContentParts
     try {
-      const templateReferenceImages = layoutTemplates.map((template) => template.imageUrl)
-      const strategyReferenceImages = [...new Set([...referenceImages, ...templateReferenceImages])]
       const strategyReferenceRoles = [
         ...referenceImageRoles,
         ...layoutTemplates.map((template, index) => ({
@@ -533,7 +561,9 @@ router.post('/', async (req, res) => {
       baseUrl,
       timeoutMs,
       requestedTaskCount: requestedTasks.length,
-      referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0
+      referenceImageCount: Array.isArray(referenceImages) ? referenceImages.length : 0,
+      templateImageCount: templateReferenceImages.length,
+      sentImageCount: imageContentParts.filter((part) => part.type === 'image_url').length
     })
 
     const strategyTasks = requestedTasks
@@ -589,6 +619,14 @@ router.post('/', async (req, res) => {
       upstreamElapsedMs: Date.now() - upstreamStartedAt,
       totalElapsedMs: Date.now() - startedAt,
       usage: combinedCompletion.usage || null,
+      finishReason: combinedCompletion.choices?.[0]?.finish_reason || null,
+      contentType: combinedCompletion.choices?.[0]?.message?.content === null
+        ? 'null'
+        : typeof combinedCompletion.choices?.[0]?.message?.content,
+      contentChars: typeof combinedCompletion.choices?.[0]?.message?.content === 'string'
+        ? combinedCompletion.choices[0].message.content.length
+        : 0,
+      refusalPresent: Boolean(combinedCompletion.choices?.[0]?.message?.refusal),
       clientClosed
     })
 
@@ -739,6 +777,8 @@ router.post('/', async (req, res) => {
       stage: error.stage || 'unknown',
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     })
+  } finally {
+    res.locals.releaseModelRequest?.()
   }
 })
 

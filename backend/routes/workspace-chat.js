@@ -196,6 +196,8 @@ router.post('/', parseWorkspaceChatUpload, async (req, res) => {
       success: false,
       message: error.message || '产品分析对话失败'
     })
+  } finally {
+    res.locals.releaseModelRequest?.()
   }
 })
 

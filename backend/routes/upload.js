@@ -48,6 +48,9 @@ router.post('/', upload.array('images', MAX_UPLOAD_FILES), async (req, res) => {
         role: req.query?.kind === 'feedback' ? 'FEEDBACK_REFERENCE' : 'PRODUCT_REFERENCE',
         actor: req.auth
       })
+      if (req.auth && !asset) {
+        throw Object.assign(new Error('图片已写入存储，但数据库登记失败，请检查数据库后重新上传。'), { statusCode: 503 })
+      }
       const url = asset?.publicUrl || stored.url
 
       return {
@@ -67,7 +70,7 @@ router.post('/', upload.array('images', MAX_UPLOAD_FILES), async (req, res) => {
     })
   } catch (error) {
     console.error('Upload error:', error)
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Upload failed',
       message: error.message
     })

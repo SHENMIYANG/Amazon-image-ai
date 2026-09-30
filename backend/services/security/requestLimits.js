@@ -38,8 +38,9 @@ export function concurrencyLimit({ name, max, key = (req) => req.auth?.userId ||
       if (nextCount > 0) activeRequests.set(requestKey, nextCount)
       else activeRequests.delete(requestKey)
     }
+    res.locals = res.locals || {}
+    res.locals.releaseModelRequest = release
     res.once('finish', release)
-    res.once('close', release)
     next()
   }
 }

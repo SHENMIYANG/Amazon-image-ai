@@ -35,6 +35,11 @@ function getHttpStatusMessage(status) {
 export function formatApiError(error, label = '请求') {
   const status = Number(error?.status || error?.statusCode || 0)
   const rawMessage = String(error?.message || '').trim()
+  const details = error?.responseData || {}
+  const stages = { layout_templates: '模板读取', reference_images: '参考图片读取', model_request: '模型请求', model_response: '模型返回解析' }
+  if (details.requestId && details.stage) {
+    return `${label}失败（HTTP ${status || 500}，${stages[details.stage] || '后端处理'}）：${rawMessage || getHttpStatusMessage(status)}\n请求编号：${details.requestId}`
+  }
 
   if (status) {
     const statusMessage = getHttpStatusMessage(status)

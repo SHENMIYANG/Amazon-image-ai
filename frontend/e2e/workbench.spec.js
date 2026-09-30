@@ -138,7 +138,25 @@ test('卖点模板按确认结果锁定卖点图数量', async ({ page, context 
 
   await page.locator('.layout-template-modal').click({ position: { x: 3, y: 3 } })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: /三段卖点证明/ }).click()
+  await dialog.getByRole('button', { name: '预览 三段卖点证明', exact: true }).click()
+  const preview = page.getByRole('dialog', { name: '模板大图预览' })
+  await expect(preview.getByAltText('三段卖点证明 原图')).toBeVisible()
+  await preview.getByRole('button', { name: '放大', exact: true }).click()
+  await expect(preview.locator('output')).toHaveText('125%')
+  await preview.getByRole('button', { name: '适应窗口' }).click()
+  await expect(preview.locator('output')).toHaveText('100%')
+  await page.screenshot({ path: `${process.env.TEMP}/template-preview-desktop.png` })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(preview.getByRole('button', { name: '关闭预览' })).toBeVisible()
+  await page.screenshot({ path: `${process.env.TEMP}/template-preview-mobile.png` })
+  await page.keyboard.press('Escape')
+  await expect(preview).toHaveCount(0)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expect(dialog.getByRole('heading', { name: '已选模板 0/8' })).toBeVisible()
+  await dialog.getByRole('button', { name: '三段卖点证明', exact: true }).click()
+  await dialog.getByRole('button', { name: '预览已选 三段卖点证明' }).click()
+  await expect(preview).toBeVisible()
+  await preview.getByRole('button', { name: '关闭预览' }).click()
   await dialog.getByRole('button', { name: '确认' }).click()
 
   await expect(page.getByRole('button', { name: /已选 1 张，卖点图数量已锁定/ })).toBeVisible()
@@ -146,6 +164,166 @@ test('卖点模板按确认结果锁定卖点图数量', async ({ page, context 
   await expect(featureRow.locator('.image-task-stepper span')).toHaveText('1')
   await expect(featureRow.locator('.image-task-stepper button').first()).toBeDisabled()
   await expect(featureRow.locator('.image-task-stepper button').last()).toBeDisabled()
+})
+
+test('选择模板后生成策略并展示可编辑结果', async ({ page, context }) => {
+  await mockApi(context)
+  const template = {
+    id: 'template-feature-1',
+    name: '卖点证明版式',
+    scope: 'PUBLIC',
+    imageUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"/>'
+  }
+  await context.route('**/api/templates?scope=*', (route) => json(route, { success: true, templates: [template] }))
+  await context.route('**/api/upload', (route) => json(route, {
+    success: true,
+    images: [{ url: '/api/assets/local/reference/product-template-test.png' }]
+  }))
+  await context.route('**/api/assets/local/reference/product-template-test.png?probe=*', (route) => route.fulfill({ status: 200 }))
+  let analysisRequest
+  await context.route('**/api/agent-analyze', (route) => {
+    analysisRequest = route.request().postDataJSON()
+    const imagePlans = analysisRequest.selectedImageTasks.flatMap(({ type, count }) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: index + 1,
+        taskKey: `${type}-${index + 1}`,
+        taskType: type,
+        name: `${type} ${index + 1}`,
+        strategyContent: `中文策略 ${type}-${index + 1}`,
+        promptEn: `English prompt ${type}-${index + 1}`,
+        ...(type === 'feature' ? {
+          layoutTemplateId: template.id,
+          layoutTemplateName: template.name,
+          layoutTemplateUrl: template.imageUrl
+        } : {})
+      }))
+    )
+    return json(route, {
+      success: true,
+      data: {
+        productBlueprint: {},
+        _meta: { analysisRevision: analysisRequest.analysisRevision },
+        imagePlans
+      }
+    })
+  })
+
+  await page.goto('/')
+  await page.locator('textarea').first().fill('测试卖点产品资料')
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: 'product.png', mimeType: 'image/png', buffer: Buffer.from('mocked-product-image')
+  })
+  await page.getByRole('button', { name: /选择卖点排版/ }).click()
+  const dialog = page.getByRole('dialog', { name: '设置卖点图排版参考' })
+  await dialog.getByRole('button', { name: template.name, exact: true }).click()
+  await dialog.getByRole('button', { name: '确认' }).click()
+  await page.getByRole('button', { name: '一键生成出图方案' }).click()
+
+  await expect(page.getByText(/策略生成成功/)).toBeVisible()
+  expect(analysisRequest.layoutTemplateIds).toEqual([template.id])
+  expect(analysisRequest.selectedImageTasks.find(({ type }) => type === 'feature').count).toBe(1)
+  await expect(page.locator('.image-plan-group').filter({ hasText: `参考版式：${template.name}` }).locator('textarea').first()).toHaveValue('中文策略 feature-1')
+})
+
+test('卖点模板支持批量上传并报告部分失败', async ({ page, context }) => {
+  await mockApi(context)
+  const publicTemplates = []
+  let uploadCount = 0
+  await context.route('**/api/templates**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      uploadCount += 1
+      const body = request.postData() || ''
+      const name = body.match(/name="name"\r?\n\r?\n([^\r\n]+)/)?.[1] || `模板 ${uploadCount}`
+      if (uploadCount === 2) return json(route, { message: '图片格式不支持。' }, 400)
+      publicTemplates.push({
+        id: `template-upload-${uploadCount}`,
+        name,
+        scope: 'PUBLIC',
+        canManage: true,
+        imageUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="%23dcfce7"/></svg>'
+      })
+      return json(route, { success: true, template: publicTemplates.at(-1) })
+    }
+    const scope = new URL(request.url()).searchParams.get('scope')
+    return json(route, { success: true, templates: scope === 'public' ? publicTemplates : [] })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /选择卖点排版/ }).click()
+  const dialog = page.getByRole('dialog', { name: '设置卖点图排版参考' })
+  await dialog.locator('input[type="file"]').setInputFiles([
+    { name: 'layout-a.png', mimeType: 'image/png', buffer: Buffer.from('a') },
+    { name: 'layout-b.png', mimeType: 'image/png', buffer: Buffer.from('b') }
+  ])
+
+  await expect.poll(() => uploadCount).toBe(2)
+  await expect(dialog.getByText(/已上传 1\/2 张/)).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'layout-a', exact: true })).toBeVisible()
+})
+
+test('模板列表晚到的响应不会覆盖当前范围', async ({ page, context }) => {
+  await mockApi(context)
+  let releasePublic
+  const publicHeld = new Promise((resolve) => { releasePublic = resolve })
+  await context.route('**/api/templates?scope=*', async (route) => {
+    const scope = new URL(route.request().url()).searchParams.get('scope')
+    if (scope === 'public') await publicHeld
+    await json(route, {
+      success: true,
+      templates: [{ id: scope, name: scope === 'public' ? '公用旧结果' : '我的新结果', imageUrl: 'data:image/svg+xml,<svg/>' }]
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /选择卖点排版/ }).click()
+  const dialog = page.getByRole('dialog', { name: '设置卖点图排版参考' })
+  await dialog.getByRole('button', { name: '我的模板', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: '我的新结果', exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '我的模板', exact: true }).click()
+  await expect(dialog.getByText('正在读取模板...')).toHaveCount(0)
+  releasePublic()
+  await expect(dialog.getByRole('button', { name: '公用旧结果' })).toHaveCount(0)
+})
+
+test('生图响应断开后用原请求编号找回结果', async ({ page, context }) => {
+  await mockApi(context)
+  const storageKey = `amazon-image-studio:tasks:${user.id}`
+  await page.addInitScript(({ key, task }) => window.localStorage.setItem(key, JSON.stringify([task])), {
+    key: storageKey,
+    task: {
+      id: 2011, status: 'stopped', resolution: '2k', createdAt: '2026-09-17T08:00:00.000Z',
+      listing: { productName: '断线测试', complexity: 'L2' }, referenceImages: [],
+      images: [{
+        imageId: 1, name: 'Feature Image 1', taskType: 'feature', status: 'pending',
+        strategyContent: '展示已确认的卖点。', promptEn: 'Show the confirmed selling point.',
+        promptDirty: false, versions: []
+      }]
+    }
+  })
+  let requestId
+  let statusChecks = 0
+  await context.route('**/api/generate', async (route) => {
+    requestId = route.request().headers()['x-generation-request-id']
+    await route.abort('failed')
+  })
+  await context.route('**/api/generate/status/*', (route) => {
+    expect(new URL(route.request().url()).pathname.endsWith(requestId)).toBe(true)
+    statusChecks += 1
+    return json(route, {
+      success: true,
+      run: statusChecks === 1
+        ? { status: 'RUNNING', images: [] }
+        : { status: 'SUCCEEDED', images: [{ imageUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>', status: 'completed' }] }
+    })
+  })
+
+  await page.goto('/')
+  await expect(page.getByText('已停止')).toBeVisible()
+  await page.getByRole('button', { name: /继续/ }).click()
+  await expect(page.getByAltText('生成图片 1')).toBeVisible()
+  expect(requestId).toMatch(/^generation_[a-f0-9]{32}$/)
+  expect(statusChecks).toBeGreaterThanOrEqual(2)
 })
 
 test('刷新后恢复任务并在续做和重新生成时保留模板', async ({ page, context }) => {

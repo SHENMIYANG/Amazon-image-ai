@@ -744,10 +744,50 @@ export async function persistGenerationResult({ executionContext, images, model,
     if (generationRunId) {
       try {
         const db = await getDatabaseClient()
-        await db?.generationRun.updateMany({
-          where: { id: generationRunId, workspaceId, imagePlanId },
-          data: { status: 'FAILED', completedAt: new Date(), errorMessage: '生成结果保存失败，请检查使用记录。' }
-        })
+        const completedImages = (Array.isArray(images) ? images : []).filter((image) => image?.status === 'completed' && image.imageUrl)
+        if (db && completedImages.length) {
+          await db.$transaction(async (tx) => {
+            const workspace = await tx.productWorkspace.findUnique({ where: { id: workspaceId }, select: { organizationId: true } })
+            if (!workspace) throw new Error('工作区不存在，无法补记图片。')
+            for (const image of completedImages) {
+              const reference = assetReference(image.imageUrl)
+              const asset = reference ? await tx.asset.upsert({
+                where: { storageProvider_objectKey: reference },
+                update: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey) },
+                create: {
+                  organizationId: workspace.organizationId,
+                  workspaceId,
+                  storageProvider: reference.storageProvider,
+                  objectKey: reference.objectKey,
+                  publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey),
+                  mimeType: 'image/png',
+                  role: 'GENERATED_IMAGE',
+                  createdById: actor?.userId || null
+                }
+              }) : null
+              await tx.generatedImage.create({
+                data: {
+                  generationRunId,
+                  assetId: asset?.id || null,
+                  imageUrlSnapshot: image.imageUrl,
+                  width: image.actualWidth || image.width || null,
+                  height: image.actualHeight || image.height || null,
+                  requestResolution: image.resolution || executionContext?.output?.resolution || null,
+                  actualResolution: image.actualResolution || null
+                }
+              })
+            }
+            await tx.generationRun.update({
+              where: { id: generationRunId },
+              data: { status: 'SUCCEEDED', completedAt: new Date(), errorMessage: '图片已生成，部分记录保存失败。' }
+            })
+          })
+        } else if (db) {
+          await db.generationRun.updateMany({
+            where: { id: generationRunId, workspaceId, imagePlanId },
+            data: { status: 'FAILED', completedAt: new Date(), errorMessage: '生成结果保存失败，请检查使用记录。' }
+          })
+        }
       } catch (finalizeError) {
         console.error('[persistence] failed to finalize generation run', { generationRunId, message: finalizeError.message })
       }
@@ -767,6 +807,7 @@ function serializeGenerationRun(run) {
     images: (run.generatedImages || []).map((image) => ({
       imageUrl: assetUrl(image.asset) || image.imageUrlSnapshot,
       status: 'completed',
+      persistenceWarning: run.status === 'SUCCEEDED' ? run.errorMessage || '' : '',
       resolution: image.requestResolution,
       actualResolution: image.actualResolution,
       actualWidth: image.width,

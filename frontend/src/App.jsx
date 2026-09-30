@@ -116,25 +116,32 @@ async function requestGenerationStatus(requestId) {
 }
 
 async function requestGeneratedImage({ listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages = [], requestId, label }) {
-  const generateResponse = await fetch('/api/generate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Generation-Request-Id': requestId
-    },
-    body: JSON.stringify(buildGenerateRequest(listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages))
-  })
-  const data = await parseApiJson(generateResponse, label)
-  const generatedImage = data.images && data.images[0]
-  const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
-
-  if (!realSuccess) {
-    throw new Error(generatedImage?.error || data.message || '生成失败')
-  }
-
-  return {
-    ...generatedImage,
-    persistenceWarning: data.persistenceWarning || ''
+  try {
+    const generateResponse = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Generation-Request-Id': requestId
+      },
+      body: JSON.stringify(buildGenerateRequest(listing, plan, resolution, referenceImages, primaryReferenceImageUrl, regenerationReferenceImages))
+    })
+    const data = await parseApiJson(generateResponse, label)
+    const generatedImage = data.images && data.images[0]
+    const realSuccess = data.success && generatedImage && generatedImage.status === 'completed' && generatedImage.imageUrl
+    if (!realSuccess) throw new Error(generatedImage?.error || data.message || '生成失败')
+    return { ...generatedImage, persistenceWarning: data.persistenceWarning || '' }
+  } catch (error) {
+    if (error.status && error.status < 500 && error.status !== 202) throw error
+    if (error.responseData?.status === 'PERSISTENCE_UNAVAILABLE') throw error
+    try {
+      const run = await requestGenerationStatus(requestId)
+      if (run.status === 'SUCCEEDED' && run.images?.[0]?.imageUrl) return run.images[0]
+      if (run.status === 'FAILED' || run.status === 'CANCELLED') throw Object.assign(new Error(run.errorMessage || '生成失败'), { generationFailed: true })
+    } catch (statusError) {
+      if (statusError.generationFailed) throw statusError
+    }
+    error.generationPending = true
+    throw error
   }
 }
 
@@ -223,7 +230,7 @@ function recoverStoredTasks(tasks = []) {
       images,
       status: isRecovering ? 'recovering' : hasUnknownRequest ? 'recovery_unknown' : wasRunning ? 'stopped' : task.status,
       recoveryNotice: isRecovering
-        ? '正在向服务器核对刷新前的生成状态，请稍候。'
+        ? '正在向服务器核对生成状态，请稍候。'
         : hasUnknownRequest
           ? '这是旧版任务，缺少生成请求编号。请先检查使用记录，再确认是否续做。'
         : task.recoveryNotice
@@ -474,7 +481,10 @@ function App() {
                 : image.versions || []
             }
           }
-          if (run.status === 'FAILED' || run.status === 'CANCELLED' || (run.status === 'SUCCEEDED' && !run.images?.[0]?.imageUrl)) {
+          if (run.status === 'SUCCEEDED' && !run.images?.[0]?.imageUrl) {
+            return { ...image, status: 'recovery_unknown', recoveryMode: null, error: '服务器报告已完成，但没有可读取的图片。请先检查使用记录。' }
+          }
+          if (run.status === 'FAILED' || run.status === 'CANCELLED') {
             if (image.recoveryMode === 'regenerating' && image.imageUrl) {
               return {
                 ...image,
@@ -498,6 +508,12 @@ function App() {
               ? { ...image, status: 'recovery_unknown', recoveryChecks }
               : { ...image, recoveryChecks }
           }
+          if (run.status === 'RUNNING' || run.status === 'UNAVAILABLE') {
+            const recoveryChecks = Number(image.recoveryChecks || 0) + 1
+            return recoveryChecks >= 360
+              ? { ...image, status: 'recovery_unknown', recoveryChecks, error: '服务器长时间未返回结果。请先检查使用记录。' }
+              : { ...image, recoveryChecks }
+          }
           return image
         })
         if (!changed) return task
@@ -510,7 +526,7 @@ function App() {
           images,
           status: isRecovering ? 'recovering' : hasUnknownRequest ? 'recovery_unknown' : allCompleted ? 'completed' : 'stopped',
           recoveryNotice: isRecovering
-            ? '正在向服务器核对刷新前的生成状态，请稍候。'
+            ? '正在向服务器核对生成状态，请稍候。'
             : hasUnknownRequest
               ? '服务器没有找到旧请求。请先检查使用记录，再确认是否续做。'
               : null
@@ -525,7 +541,7 @@ function App() {
       active = false
       if (timer) window.clearTimeout(timer)
     }
-  }, [loadedTaskOwner])
+  }, [loadedTaskOwner, tasks.some((task) => task.images?.some((image) => image.status === 'recovering' && image.generationRequestId))])
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -984,6 +1000,19 @@ function App() {
         } catch (error) {
           console.error(`图${plan.id} 生成失败:`, error)
 
+          if (error.generationPending) {
+            setTasks((prev) => prev.map((task) => task.id === taskId
+              ? {
+                  ...task,
+                  status: 'recovering',
+                  images: task.images.map((img) => img.imageId === plan.id
+                    ? { ...img, status: 'recovering', recoveryMode: 'generating', recoveryChecks: 0, error: null }
+                    : img)
+                }
+              : task))
+            break
+          }
+
           setTasks((prev) =>
             prev.map((task) => {
               if (task.id === taskId) {
@@ -1016,6 +1045,7 @@ function App() {
             if (task.status === 'stopped') {
               return task
             }
+            if (task.status === 'recovering' || task.images.some((img) => img.status === 'recovering')) return { ...task, status: 'recovering' }
             const allCompleted = task.images.every((img) => img.status === 'completed')
             return {
               ...task,
@@ -1168,8 +1198,8 @@ function App() {
       )
       return generatedImage
     } catch (error) {
-      console.error('重新生成失败:', error)
-      if (!options.suppressAlert) {
+      console.error(error.generationPending ? '重新生成结果待确认:' : '重新生成失败:', error)
+      if (!options.suppressAlert && !error.generationPending) {
         alert(`图${image.imageId} 重新生成失败：${error.message}`)
       }
 
@@ -1182,10 +1212,12 @@ function App() {
                 if (idx === imageIndex) {
                   return {
                     ...img,
-                     status: hadCurrentImage ? 'completed' : 'failed',
-                     generationRequestId: null,
-                     error: hadCurrentImage ? null : error.message,
-                    regenerationError: error.message
+                    status: error.generationPending ? 'recovering' : hadCurrentImage ? 'completed' : 'failed',
+                    recoveryMode: error.generationPending ? 'regenerating' : null,
+                    recoveryChecks: error.generationPending ? 0 : img.recoveryChecks,
+                    generationRequestId: error.generationPending ? generationRequestId : null,
+                    error: error.generationPending || hadCurrentImage ? null : error.message,
+                    regenerationError: error.generationPending ? null : error.message
                   }
                 }
                 return img
@@ -1195,7 +1227,7 @@ function App() {
           return t
         })
       )
-      return null
+      return error.generationPending ? { generationPending: true } : null
     } finally {
       setGenerating(false)
       setCurrentTaskId(null)
@@ -1345,6 +1377,19 @@ function App() {
         )
       } catch (error) {
         console.error(`图${plan.id} 生成失败:`, error)
+        if (error.generationPending) {
+          aborted = true
+          setTasks((prev) => prev.map((item) => item.id === task.id
+            ? {
+                ...item,
+                status: 'recovering',
+                images: item.images.map((img) => img.imageId === plan.id
+                  ? { ...img, status: 'recovering', recoveryMode: 'generating', recoveryChecks: 0, error: null }
+                  : img)
+              }
+            : item))
+          break
+        }
         setTasks((prev) =>
           prev.map((t) => {
             if (t.id === task.id) {

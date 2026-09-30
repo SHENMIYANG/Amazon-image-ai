@@ -9,22 +9,36 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
   const [draft, setDraft] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 })
   const [error, setError] = useState('')
+  const [uploadNotice, setUploadNotice] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [zoom, setZoom] = useState(1)
+  const [previewError, setPreviewError] = useState('')
+  const previewRef = useRef(null)
   const fileRef = useRef(null)
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
+  const loadRequestRef = useRef(0)
 
   const loadTemplates = async (nextScope = scope) => {
+    const requestNumber = ++loadRequestRef.current
     setLoading(true)
     setError('')
+    setUploadNotice('')
     try {
       const data = await parseApiJson(
         await fetch(`/api/templates?scope=${nextScope.toLowerCase()}`),
         nextScope === 'PUBLIC' ? '公用模板接口' : '我的模板接口'
       )
+      if (requestNumber !== loadRequestRef.current || nextScope !== scopeRef.current) return false
       setTemplates(data.templates || [])
+      return true
     } catch (requestError) {
-      setError(requestError.message)
+      if (requestNumber === loadRequestRef.current && nextScope === scopeRef.current) setError(requestError.message)
+      return false
     } finally {
-      setLoading(false)
+      if (requestNumber === loadRequestRef.current && nextScope === scopeRef.current) setLoading(false)
     }
   }
 
@@ -32,9 +46,27 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
     if (open) loadTemplates(scope)
   }, [open, scope])
 
+  useEffect(() => {
+    if (!preview) return
+    const dialog = previewRef.current
+    const previousFocus = document.activeElement
+    dialog.showModal()
+    return () => {
+      dialog.close()
+      previousFocus?.focus()
+    }
+  }, [preview])
+
+  const openPreview = (template) => {
+    setZoom(1)
+    setPreviewError('')
+    setPreview(template)
+  }
+
   const openPicker = () => {
     setDraft(selected)
     setError('')
+    setUploadNotice('')
     setOpen(true)
   }
 
@@ -49,23 +81,38 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
   }
 
   const uploadTemplate = async (event) => {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files || [])
     event.target.value = ''
-    if (!file) return
+    if (!files.length) return
     setUploading(true)
+    setUploadProgress({ current: 0, total: files.length })
     setError('')
-    try {
+    setUploadNotice('')
+    const failures = []
+    let succeeded = 0
+
+    for (const [index, file] of files.entries()) {
+      setUploadProgress({ current: index + 1, total: files.length })
       const formData = new FormData()
       formData.append('image', file)
       formData.append('name', file.name.replace(/\.[^.]+$/, ''))
       formData.append('scope', scope)
-      await parseApiJson(await fetch('/api/templates', { method: 'POST', body: formData }), '模板上传接口')
-      await loadTemplates(scope)
-    } catch (requestError) {
-      setError(requestError.message)
-    } finally {
-      setUploading(false)
+      try {
+        await parseApiJson(await fetch('/api/templates', { method: 'POST', body: formData }), '模板上传接口')
+        succeeded += 1
+      } catch (requestError) {
+        failures.push(`${file.name}: ${requestError.message}`)
+      }
     }
+
+    const loaded = await loadTemplates(scope)
+    if (failures.length) {
+      setError(`已上传 ${succeeded}/${files.length} 张。失败：${failures.join('；')}`)
+    } else if (loaded) {
+      setUploadNotice(`已上传 ${succeeded} 张模板。`)
+    }
+    setUploading(false)
+    setUploadProgress({ current: 0, total: 0 })
   }
 
   const renameTemplate = async (template) => {
@@ -121,32 +168,37 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
             <div className="layout-template-modal__body">
               <main className="layout-template-library">
                 <nav className="layout-template-tabs" aria-label="模板范围">
-                  <button type="button" className={scope === 'PUBLIC' ? 'is-active' : ''} onClick={() => setScope('PUBLIC')}>公用模板</button>
-                  <button type="button" className={scope === 'PERSONAL' ? 'is-active' : ''} onClick={() => setScope('PERSONAL')}>我的模板</button>
+                  <button type="button" className={scope === 'PUBLIC' ? 'is-active' : ''} onClick={() => { if (scope !== 'PUBLIC') { setLoading(true); setScope('PUBLIC') } }} disabled={uploading}>公用模板</button>
+                  <button type="button" className={scope === 'PERSONAL' ? 'is-active' : ''} onClick={() => { if (scope !== 'PERSONAL') { setLoading(true); setScope('PERSONAL') } }} disabled={uploading}>我的模板</button>
                 </nav>
 
                 <p className="layout-template-tip">最多选择 {maxSelection} 张。只迁移构图、信息层级和卖点证明方法，不复制竞品品牌、文案或产品。</p>
-                {error && <p className="layout-template-modal__error">{error}</p>}
+                {error && <p className="layout-template-modal__error" aria-live="polite">{error}</p>}
+                {uploadNotice && <p className="layout-template-modal__notice" aria-live="polite">{uploadNotice}</p>}
 
-                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadTemplate} hidden />
+                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={uploadTemplate} hidden />
                 <div className="layout-template-grid">
                   {canUpload && (
                     <button type="button" className="layout-template-upload" onClick={() => fileRef.current?.click()} disabled={uploading}>
                       <b aria-hidden="true">+</b>
-                      <strong>{uploading ? '上传中...' : scope === 'PUBLIC' ? '上传公用模板' : '上传我的模板'}</strong>
-                      <small>JPG、PNG、WebP，最大 10MB</small>
+                      <strong>{uploading ? `上传中 ${uploadProgress.current}/${uploadProgress.total}...` : scope === 'PUBLIC' ? '上传公用模板' : '上传我的模板'}</strong>
+                      <small>可多选，JPG、PNG、WebP，每张最大 10MB</small>
                     </button>
                   )}
                   {loading ? <p className="layout-template-modal__empty">正在读取模板...</p> : templates.map((template) => {
                     const selectedIndex = draft.findIndex((item) => item.id === template.id)
                     return (
                       <article key={template.id} className={selectedIndex >= 0 ? 'is-selected' : ''}>
-                        <button type="button" className="layout-template-grid__card" onClick={() => toggleTemplate(template)}>
+                        <button type="button" className="layout-template-grid__preview" onClick={() => openPreview(template)} aria-label={`预览 ${template.name}`} title="查看原图">
                           <img src={template.imageUrl} alt={template.name} />
+                        </button>
+                        <button type="button" className="layout-template-grid__card" aria-label={template.name} aria-pressed={selectedIndex >= 0} onClick={() => toggleTemplate(template)}>
                           <span>{template.name}</span>
                           {selectedIndex >= 0 && <b>{selectedIndex + 1}</b>}
                         </button>
-                        {template.canManage && <div className="layout-template-grid__actions"><button type="button" onClick={() => renameTemplate(template)}>改名</button><button type="button" onClick={() => archiveTemplate(template)}>删除</button></div>}
+                        <div className="layout-template-grid__actions">
+                          {template.canManage && <><button type="button" onClick={() => renameTemplate(template)}>改名</button><button type="button" onClick={() => archiveTemplate(template)}>删除</button></>}
+                        </div>
                       </article>
                     )
                   })}
@@ -160,7 +212,7 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
                   {draft.length === 0 ? <p>未选择模板，AI 将根据产品自行设计卖点图。</p> : draft.map((template, index) => (
                     <div key={template.id}>
                       <b>{index + 1}</b>
-                      <img src={template.imageUrl} alt="" />
+                      <button type="button" onClick={() => openPreview(template)} aria-label={`预览已选 ${template.name}`}><img src={template.imageUrl} alt="" /></button>
                       <span>{template.name}</span>
                       <button type="button" onClick={() => toggleTemplate(template)} aria-label={`移除 ${template.name}`}>×</button>
                     </div>
@@ -175,6 +227,26 @@ export default function LayoutTemplatePicker({ selected = [], onChange, isAdmin 
             </footer>
           </div>
         </div>
+      )}
+      {preview && (
+        <dialog ref={previewRef} className="layout-template-preview" aria-label="模板大图预览" onCancel={() => setPreview(null)}>
+          <header>
+            <strong>{preview.name}</strong>
+            <div>
+              <button type="button" onClick={() => setZoom((value) => Math.max(.5, value - .25))} disabled={zoom <= .5} aria-label="缩小" title="缩小">−</button>
+              <output aria-label="缩放比例">{Math.round(zoom * 100)}%</output>
+              <button type="button" onClick={() => setZoom((value) => Math.min(4, value + .25))} disabled={zoom >= 4} aria-label="放大" title="放大">+</button>
+              <button type="button" onClick={() => setZoom(1)} aria-label="适应窗口" title="适应窗口">↺</button>
+              <button type="button" onClick={() => setPreview(null)} aria-label="关闭预览" title="关闭预览">×</button>
+            </div>
+          </header>
+          {previewError && <p role="alert">{previewError}</p>}
+          <div className="layout-template-preview__stage" onWheel={(event) => {
+            setZoom((value) => Math.max(.5, Math.min(4, value + (event.deltaY < 0 ? .25 : -.25))))
+          }}>
+            <img src={preview.imageUrl} alt={`${preview.name} 原图`} onError={() => setPreviewError('模板原图读取失败，请检查图片存储服务。')} style={{ width: `${zoom * 100}%`, maxHeight: zoom <= 1 ? '100%' : 'none' }} />
+          </div>
+        </dialog>
       )}
     </div>
   )

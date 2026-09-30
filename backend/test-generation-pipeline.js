@@ -8,7 +8,9 @@ import {
 import {
   bindLayoutTemplatesToTasks,
   getDistinctSellingPoints,
-  getIncompleteStrategyPlanIds
+  getIncompleteStrategyPlanIds,
+  parseCompletionJson,
+  getStrategyReferenceImages
 } from './routes/agent-analyze.js'
 import { normalizeExecutionRules } from './services/agent/executionRules.js'
 import { normalizeStrategyPlans } from './services/agent/planNormalizer.js'
@@ -169,6 +171,17 @@ function testLayoutTemplatesBindToFeatureTasksInOrder() {
   assert.equal(result[1].layoutTemplateId, 'a')
   assert.equal(result[2].layoutTemplateId, 'b')
   assert.throws(() => bindLayoutTemplatesToTasks(tasks, [{ id: 'a' }]), /数量必须与模板数量一致/)
+}
+
+function testStrategyReferenceImageLimit() {
+  const productImages = Array.from({ length: 8 }, (_, index) => `/product-${index}.png`)
+  const templates = Array.from({ length: 8 }, (_, index) => ({ imageUrl: `/template-${index}.png` }))
+  assert.equal(getStrategyReferenceImages(productImages, templates).length, 16)
+  assert.equal(getStrategyReferenceImages([...productImages, productImages[0]], templates).length, 16)
+  assert.throws(
+    () => getStrategyReferenceImages([...productImages, '/product-9.png'], templates),
+    (error) => error.status === 400 && error.stage === 'reference_images' && /最多 16 张/.test(error.message)
+  )
 }
 
 function testGeneratedImageSizeContract() {
@@ -360,9 +373,13 @@ function testMainImageStrategyUsesAiPlanAndKeepsCompliance() {
 }
 
 await testMainImageNormalization()
+assert.deepEqual(parseCompletionJson({ choices: [{ message: { content: '```json\n{"imagePlans":[]}\n```' } }] }, 'strategy'), { imagePlans: [] })
+assert.throws(() => parseCompletionJson({ choices: [{ message: { content: [{ text: 'invalid' }] } }] }, 'strategy'), /non-text content/)
+assert.throws(() => parseCompletionJson({ choices: [{ message: { content: null } }] }, 'strategy'), /did not return JSON/)
   testScenarioUsageContract()
   testLayoutTemplateReferenceStaysSeparateFromProductTruth()
 testLayoutTemplatesBindToFeatureTasksInOrder()
+testStrategyReferenceImageLimit()
 testGeneratedImageSizeContract()
 testStrategyContractAndInputDeduplication()
 testExecutionRulesRemainVisibleWhenTheyReinforceStrategy()

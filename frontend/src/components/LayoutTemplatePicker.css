@@ -19,6 +19,7 @@
 .layout-template-tabs button.is-active { border-color: #6d3df2; color: #6d3df2; }
 .layout-template-tip { margin: .8rem 1.2rem 0; padding: .65rem .8rem; border-left: 3px solid #f59e0b; background: #fff9df; color: #8a5900; font-size: .75rem; line-height: 1.45; }
 .layout-template-modal__error { margin: .65rem 1.2rem 0; color: #b91c1c; font-size: .76rem; }
+.layout-template-modal__notice { margin: .65rem 1.2rem 0; color: #15803d; font-size: .76rem; }
 .layout-template-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap: .9rem; overflow: auto; padding: 1rem 1.2rem 1.3rem; }
 .layout-template-grid article, .layout-template-upload { min-width: 0; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; overflow: hidden; }
 .layout-template-grid article.is-selected { border-color: #6d3df2; box-shadow: 0 0 0 2px rgba(109,61,242,.14); }
@@ -27,12 +28,24 @@
 .layout-template-upload strong { margin-top: .4rem; font-size: .86rem; }
 .layout-template-upload small { margin-top: .35rem; color: #64748b; font-size: .68rem; }
 .layout-template-grid__card { position: relative; display: block; width: 100%; padding: 0; border: 0; background: #fff; text-align: left; cursor: pointer; }
-.layout-template-grid__card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
-.layout-template-grid__card span { display: block; overflow: hidden; padding: .58rem .65rem; color: #1e293b; font-size: .75rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.layout-template-grid__preview { display: block; width: 100%; border: 0; padding: 0; background: #fff; cursor: zoom-in; }
+.layout-template-grid__preview img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
+.layout-template-grid__card span { display: block; overflow: hidden; padding: .58rem 38px .58rem .65rem; color: #1e293b; font-size: .75rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .layout-template-grid__card > b { position: absolute; top: .5rem; right: .5rem; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #6d3df2; color: #fff; font-size: .75rem; }
 .layout-template-grid__actions { display: flex; gap: .7rem; padding: 0 .65rem .58rem; }
 .layout-template-grid__actions button { padding: 0; border: 0; background: none; color: #64748b; font-size: .7rem; cursor: pointer; }
 .layout-template-grid__actions button:last-child { color: #b91c1c; }
+.layout-template-preview { width: min(1100px,calc(100vw - 32px)); height: min(900px,calc(100dvh - 32px)); max-width: none; max-height: none; margin: auto; padding: 0; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #fff; }
+.layout-template-preview[open] { display: flex; flex-direction: column; }
+.layout-template-preview::backdrop { background: rgba(15,23,42,.7); }
+.layout-template-preview header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid #e5e7eb; }
+.layout-template-preview strong { min-width: 0; overflow-wrap: anywhere; font-size: .9rem; }
+.layout-template-preview header > div { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.layout-template-preview button { width: 32px; height: 32px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
+.layout-template-preview output { width: 42px; text-align: center; font-size: .75rem; }
+.layout-template-preview__stage { flex: 1; min-height: 0; overflow: auto; background: #f1f5f9; overscroll-behavior: contain; }
+.layout-template-preview__stage img { display: block; height: auto; object-fit: contain; margin: auto; }
+.layout-template-preview > p { padding: 0 12px; color: #b91c1c; }
 .layout-template-modal__empty { padding: 1rem 1.2rem; color: #64748b; font-size: .78rem; }
 .layout-template-selection { min-width: 0; padding: 1rem; border-left: 1px solid #e5e7eb; background: #fff; overflow: auto; }
 .layout-template-selection h4 { display: flex; justify-content: space-between; margin: 0 0 .8rem; color: #172033; font-size: .85rem; }

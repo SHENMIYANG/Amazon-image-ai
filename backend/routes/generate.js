@@ -175,6 +175,12 @@ router.post('/', async (req, res) => {
         return 2
       }
       const maxReferenceImages = getMaxReferenceImages()
+      if (candidateReferenceImages.length > maxReferenceImages) {
+        return res.status(400).json({
+          success: false,
+          message: `本次生图有 ${candidateReferenceImages.length} 张参考图，最多支持 ${maxReferenceImages} 张。请减少产品图或模板后重试。`
+        })
+      }
       const layoutReferenceImages = candidateReferenceImages.filter((imageUrl) => roleByUrl.get(imageUrl) === 'layout_style_reference')
       const nonLayoutReferenceImages = candidateReferenceImages
         .filter((imageUrl) => roleByUrl.get(imageUrl) !== 'layout_style_reference')
@@ -369,7 +375,11 @@ router.post('/', async (req, res) => {
       })
     }
   } finally {
-    await cleanupReferenceFiles()
+    try {
+      await cleanupReferenceFiles()
+    } finally {
+      res.locals.releaseModelRequest?.()
+    }
   }
 })
 

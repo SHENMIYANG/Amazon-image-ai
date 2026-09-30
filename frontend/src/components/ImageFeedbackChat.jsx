@@ -262,6 +262,13 @@ export default function ImageFeedbackChat({
           nextRevision,
           attachments.map((item) => item.url).filter(Boolean)
         )
+        if (generatedImage?.generationPending) {
+          appendAndSave(currentMessages, {
+            role: 'assistant',
+            content: '生图请求可能仍在服务器处理，工作台正在核对结果。请勿重复提交。'
+          }, nextRevision)
+          return
+        }
         if (!generatedImage?.imageUrl) {
           throw new Error('重新生成失败：生图接口没有返回新图片')
         }

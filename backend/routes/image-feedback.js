@@ -245,6 +245,8 @@ router.post('/chat', async (req, res) => {
       success: false,
       message: error.message || '图片反馈对话失败'
     })
+  } finally {
+    res.locals.releaseModelRequest?.()
   }
 })
 
