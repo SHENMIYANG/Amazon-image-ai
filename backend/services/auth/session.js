@@ -28,7 +28,7 @@ export function parseCookies(header = '') {
 }
 
 export function setSessionCookie(res, token, expiresAt) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  const secure = usesSecureSessionCookie() ? '; Secure' : ''
   res.append('Set-Cookie', [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
@@ -40,7 +40,7 @@ export function setSessionCookie(res, token, expiresAt) {
 }
 
 export function clearSessionCookie(res) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  const secure = usesSecureSessionCookie() ? '; Secure' : ''
   res.append('Set-Cookie', [
     `${SESSION_COOKIE_NAME}=`,
     'Path=/',
@@ -49,6 +49,12 @@ export function clearSessionCookie(res) {
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
     secure
   ].filter(Boolean).join('; '))
+}
+
+function usesSecureSessionCookie() {
+  const configured = process.env.AUTH_COOKIE_SECURE
+  if (configured === 'false') return false
+  return configured === 'true' || process.env.NODE_ENV === 'production'
 }
 
 export async function createSession(userId) {

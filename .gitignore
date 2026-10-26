@@ -21,6 +21,7 @@ backend/generate-template-examples.js
 
 # Environment variables (DO NOT commit API keys)
 .env
+.deploy.env
 backend/.env
 
 # System files

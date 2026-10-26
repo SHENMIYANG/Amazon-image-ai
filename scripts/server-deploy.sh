@@ -2,6 +2,9 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/opt/amazon-image-ai}"
+if [ -f "$PROJECT_DIR/.deploy.env" ]; then
+  source "$PROJECT_DIR/.deploy.env"
+fi
 REPO_URL="${REPO_URL:-https://github.com/SHENMIYANG/Amazon-image-ai.git}"
 DOMAIN="${DOMAIN:-image.ubjhbdhsv.top}"
 APP_NAME="${APP_NAME:-ecommerce-image-gen}"
