@@ -5,6 +5,33 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { UPLOADS_DIR, ensureUploadsDir } from '../utils/uploads.js'
 
 let client = null
+let repairingAssets = false
+
+function pendingAssetDirectory() {
+  const storage = [process.env.STORAGE_S3_ENDPOINT || '', process.env.STORAGE_S3_BUCKET || '', process.env.STORAGE_S3_REGION || 'us-east-1']
+  const namespace = crypto.createHash('sha256').update(JSON.stringify(storage)).digest('hex')
+  return path.join(process.env.REQUEST_JOURNAL_DIR || path.join(UPLOADS_DIR, 'recovery'), 'objects', namespace)
+}
+
+function pendingAssetPath(key) {
+  return /^generated\/[A-Za-z0-9._-]+\.png$/.test(key) ? path.join(pendingAssetDirectory(), path.basename(key)) : ''
+}
+
+async function stageGeneratedAsset(filePath, body) {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 })
+  const temporary = `${filePath}.${crypto.randomUUID()}.tmp`
+  try {
+    const file = await fs.promises.open(temporary, 'wx', 0o600)
+    try { await file.writeFile(body); await file.sync() } finally { await file.close() }
+    await fs.promises.rename(temporary, filePath)
+    if (process.platform !== 'win32') {
+      const directory = await fs.promises.open(path.dirname(filePath), 'r')
+      try { await directory.sync() } finally { await directory.close() }
+    }
+  } finally {
+    await fs.promises.rm(temporary, { force: true })
+  }
+}
 
 function normalizeObjectKey(objectKey = '') {
   const key = String(objectKey || '').replace(/\\/g, '/').replace(/^\/+/, '')
@@ -55,8 +82,17 @@ export async function writeAsset({ objectKey, body, contentType = 'application/o
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
     await fs.promises.writeFile(filePath, body)
   } else {
-    const s3 = getS3Client()
-    await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: body, ContentType: contentType }))
+    const pendingPath = pendingAssetPath(key)
+    if (pendingPath) await stageGeneratedAsset(pendingPath, body)
+    try {
+      const s3 = getS3Client()
+      await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: body, ContentType: contentType }))
+    } catch (error) {
+      if (!pendingPath) throw error
+      console.error('[storage] generated image staged; upload deferred', { objectKey: key, message: error.message })
+      return { storageProvider, objectKey: key, url: buildAssetUrl(storageProvider, key), storageWarning: '图片已保存在服务器，正在等待上传对象存储。请勿重复生成。' }
+    }
+    if (pendingPath) await fs.promises.rm(pendingPath, { force: true }).catch((error) => console.error('[storage] staging cleanup deferred', error.message))
   }
   return { storageProvider, objectKey: key, url: buildAssetUrl(storageProvider, key) }
 }
@@ -66,9 +102,37 @@ export async function readAssetBuffer(storageProvider, objectKey) {
   if (!key) throw new Error('无效的存储对象路径。')
   if (storageProvider === 'local') return await fs.promises.readFile(path.join(UPLOADS_DIR, key))
   if (storageProvider !== 's3') throw new Error('不支持的存储提供方。')
+  const pendingPath = pendingAssetPath(key)
+  if (pendingPath) {
+    try { return await fs.promises.readFile(pendingPath) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
   const s3 = getS3Client()
   const result = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }))
   return Buffer.from(await result.Body.transformToByteArray())
+}
+
+export async function repairPendingAssets() {
+  if (repairingAssets || getStorageProvider() !== 's3') return
+  repairingAssets = true
+  try {
+    let files
+    try { files = await fs.promises.readdir(pendingAssetDirectory()) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+    for (const name of files) {
+      const key = `generated/${name}`
+      const pendingPath = pendingAssetPath(key)
+      if (!pendingPath) continue
+      try {
+        const body = await fs.promises.readFile(pendingPath)
+        const s3 = getS3Client()
+        await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: body, ContentType: 'image/png' }))
+        await fs.promises.rm(pendingPath, { force: true })
+      } catch (error) {
+        if (error.code !== 'ENOENT') console.error('[storage] upload still pending', { objectKey: key, message: error.message })
+      }
+    }
+  } finally {
+    repairingAssets = false
+  }
 }
 
 export async function readAssetUrlBuffer(url) {

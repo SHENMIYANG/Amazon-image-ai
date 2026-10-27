@@ -20,8 +20,11 @@ import { ensureBootstrapAdmin } from './services/auth/bootstrap.js'
 import { authenticateRequest, requirePermission } from './services/auth/middleware.js'
 import { isAuthEnabled } from './services/auth/session.js'
 import { concurrencyLimit, rateLimit } from './services/security/requestLimits.js'
+import { repairPendingResults } from './services/persistence/resultRecovery.js'
+import { repairPendingAssets } from './services/storage.js'
 
 dotenv.config()
+isAuthEnabled()
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -31,7 +34,7 @@ const PORT = process.env.BACKEND_PORT || 3001
 const NODE_ENV = process.env.NODE_ENV || 'development'
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '4mb'
 const BACKEND_HOST = process.env.BACKEND_HOST || '127.0.0.1'
-const modelRequestRateLimit = rateLimit({ name: 'model', max: 16, windowMs: 10 * 60 * 1000, key: (req) => req.auth?.userId || req.ip })
+const modelRequestRateLimit = rateLimit({ name: 'model', max: 64, windowMs: 10 * 60 * 1000, key: (req) => req.auth?.userId || req.ip })
 const modelRequestConcurrencyLimit = concurrencyLimit({ name: 'model', max: 1 })
 
 app.set('trust proxy', 'loopback')
@@ -56,8 +59,8 @@ app.use(
   generateRoutes
 )
 app.use('/api/test-api-key', authenticateRequest, requirePermission('member:manage'), testApiKeyRoutes)
-app.use('/api/agent-analyze', authenticateRequest, requirePermission('strategy:generate'), modelRequestRateLimit, modelRequestConcurrencyLimit, agentAnalyzeRoutes)
-app.use('/api/prompt-preview', authenticateRequest, requirePermission('strategy:edit'), promptPreviewRoutes)
+app.use('/api/agent-analyze', authenticateRequest, requirePermission('strategy:generate'), (req, res, next) => req.method === 'GET' ? next() : modelRequestRateLimit(req, res, next), (req, res, next) => req.method === 'GET' ? next() : modelRequestConcurrencyLimit(req, res, next), agentAnalyzeRoutes)
+app.use('/api/prompt-preview', authenticateRequest, requirePermission('strategy:edit'), modelRequestRateLimit, modelRequestConcurrencyLimit, promptPreviewRoutes)
 app.use('/api/image-feedback', authenticateRequest, requirePermission('chat:use'), modelRequestRateLimit, modelRequestConcurrencyLimit, imageFeedbackRoutes)
 app.use('/api/workspace-chat', authenticateRequest, requirePermission('chat:use'), modelRequestRateLimit, modelRequestConcurrencyLimit, workspaceChatRoutes)
 app.use('/api/members', authenticateRequest, requirePermission('member:manage'), memberRoutes)
@@ -109,6 +112,12 @@ app.use((err, req, res, next) => {
 })
 
 await ensureBootstrapAdmin()
+void repairPendingResults().catch((error) => console.error('[recovery]', error.message))
+void repairPendingAssets().catch((error) => console.error('[storage-recovery]', error.message))
+setInterval(() => {
+  void repairPendingResults().catch((error) => console.error('[recovery]', error.message))
+  void repairPendingAssets().catch((error) => console.error('[storage-recovery]', error.message))
+}, 30000).unref()
 
 app.listen(PORT, BACKEND_HOST, () => {
   console.log(`🚀 Backend server running on port ${PORT}`)

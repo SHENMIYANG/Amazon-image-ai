@@ -146,7 +146,7 @@ function testLayoutTemplateReferenceStaysSeparateFromProductTruth() {
       layoutTemplateName: '信息卡',
       layoutTemplateUrl: '/api/assets/local/template/example.png'
     }],
-    strategyPlans: [{ strategyContent: '中文策略', promptEn: 'English prompt' }],
+    strategyPlans: [{ taskKey: 'layout-template-id', strategyContent: '中文策略', promptEn: 'English prompt' }],
     productBlueprint: {}
   })[0]
 

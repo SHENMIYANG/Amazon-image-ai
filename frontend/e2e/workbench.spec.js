@@ -40,6 +40,7 @@ function json(route, body, status = 200) {
 }
 
 async function mockApi(context) {
+  await context.route('**/api/assets/local/reference/recovery-product.png', (route) => route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384"/>' }))
   await context.route('**/api/auth/me', (route) => json(route, { success: true, user }))
   await context.route('**/api/members', (route) => json(route, { success: true, members: [] }))
   await context.route('**/api/activity**', (route) => {
@@ -48,6 +49,263 @@ async function mockApi(context) {
     return json(route, { success: true, canReadAll: true, records })
   })
 }
+
+function strategyRecoveryFixture() {
+  const requestId = 'analysis-browser-recovery-001'
+  const referenceImages = ['/api/assets/local/reference/recovery-product.png']
+  const listing = {
+    productName: '策略恢复测试产品', listingInfo: '策略恢复测试产品', complexity: 'L2', marketplace: 'UK',
+    selectedImageTasks: { main: 1, feature: 0, scenario: 0, detail: 0, dimensions: 0, steps: 0, comparison: 0, package: 0, summary: 0 },
+    layoutTemplates: [], _meta: { analysisRevision: 1 }
+  }
+  const data = {
+    productBlueprint: {},
+    _meta: { requestId, analysisRevision: 1, generatedAt: new Date().toISOString(), persistence: { workspaceId: 'workspace-recovered' } },
+    imagePlans: [{ id: 1, taskKey: 'main-1', taskType: 'main', name: '恢复主图', strategyContent: '找回的中文策略，保留产品结构。', promptEn: 'Recovered main image strategy.', databasePlanId: 'plan-recovered', databasePlanVersionId: 'version-recovered' }]
+  }
+  return { pending: { requestId, listing, referenceImages, primaryReferenceImageUrl: referenceImages[0], requestedAnalysisRevision: 1 }, data }
+}
+
+test('模板列表可滚动到底部，卡片与确认按钮在小窗口中完整可用', async ({ page, context }) => {
+  await mockApi(context)
+  const templates = Array.from({ length: 30 }, (_, index) => ({
+    id: `scroll-template-${index}`, name: `滚动模板 ${index + 1}`, scope: 'PUBLIC', canManage: true,
+    imageUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"/>'
+  }))
+  await context.route('**/api/templates?scope=*', (route) => json(route, { success: true, templates }))
+  await page.goto('/')
+  await page.getByRole('button', { name: /选择卖点排版/ }).click()
+  const dialog = page.getByRole('dialog', { name: '设置卖点图排版参考' })
+  const grid = dialog.locator('.layout-template-grid')
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 600 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport)
+    await grid.evaluate((element) => { element.scrollTop = 0 })
+    await grid.hover()
+    await page.mouse.wheel(0, 20000)
+    await expect.poll(() => grid.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    const lastCard = dialog.getByRole('button', { name: '滚动模板 30', exact: true })
+    await expect(lastCard).toBeInViewport()
+    await expect(dialog.locator('.layout-template-grid article').last().getByRole('button', { name: '删除', exact: true })).toBeInViewport()
+    await expect(dialog.getByRole('button', { name: '确认', exact: true })).toBeInViewport()
+  }
+  await dialog.getByRole('button', { name: '滚动模板 30', exact: true }).click()
+  await dialog.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(page.getByRole('button', { name: /已选 1 张，卖点图数量已锁定/ })).toBeVisible()
+})
+
+test('退出后换账号不带入上一位成员的产品和策略', async ({ page, context }) => {
+  await mockApi(context)
+  const { pending, data } = strategyRecoveryFixture()
+  await page.addInitScript(({ key, pending }) => window.localStorage.setItem(key, JSON.stringify(pending)), { key: `amazon-image-analysis:v1:${user.id}`, pending })
+  let activeUser = user
+  await context.route('**/api/auth/me', (route) => activeUser ? json(route, { success: true, user: activeUser }) : json(route, { success: false }, 401))
+  await context.route('**/api/auth/logout', (route) => { activeUser = null; return json(route, { success: true }) })
+  await context.route('**/api/auth/login', (route) => { activeUser = { ...user, id: 'other-member', displayName: '另一位成员' }; return json(route, { success: true, user: activeUser }) })
+  await context.route('**/api/agent-analyze/status/*', (route) => json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data }, pendingPersistence: false }))
+  await page.goto('/')
+  await expect(page.locator('textarea').first()).toHaveValue(pending.listing.listingInfo)
+  await expect(page.locator('.image-plan-group textarea').first()).toHaveValue(data.imagePlans[0].strategyContent)
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await page.getByLabel('账号或邮箱').fill('other-member')
+  await page.getByLabel('密码').fill('test-password')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page.getByText('另一位成员', { exact: true })).toBeVisible()
+  await expect(page.locator('textarea').first()).toHaveValue('')
+  await expect(page.locator('.image-plan-group textarea').first()).toHaveValue('')
+  await expect(page.getByAltText('已恢复的产品参考图 1')).toHaveCount(0)
+})
+
+test('主图策略修改后可单独保存版本，再生成图片', async ({ page, context }) => {
+  await mockApi(context)
+  const { pending, data } = strategyRecoveryFixture()
+  await page.addInitScript(({ key, pending }) => window.localStorage.setItem(key, JSON.stringify(pending)), { key: `amazon-image-analysis:v1:${user.id}`, pending })
+  await context.route('**/api/agent-analyze/status/*', (route) => json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data }, pendingPersistence: false }))
+  let saved
+  let generated
+  await context.route('**/api/prompt-preview', (route) => {
+    saved = route.request().postDataJSON()
+    return json(route, { success: true, data: { promptEn: '', persistence: { imagePlanVersionId: 'operator-main-version' } } })
+  })
+  await context.route('**/api/generate', (route) => {
+    generated = route.request().postDataJSON()
+    return json(route, { success: true, images: [{ status: 'completed', imageUrl: pending.referenceImages[0] }] })
+  })
+  await page.goto('/')
+  const strategy = page.locator('.image-plan-group textarea').first()
+  await expect(strategy).toHaveValue(data.imagePlans[0].strategyContent)
+  await strategy.fill('保留白底，按我修改的角度展示产品。')
+  await page.getByRole('button', { name: '保存主图策略', exact: true }).click()
+  await expect(page.getByText('主图策略已保存', { exact: true })).toBeVisible()
+  expect(saved.plan.strategyContent).toBe('保留白底，按我修改的角度展示产品。')
+  await page.getByRole('button', { name: /开始生成/ }).click()
+  await expect.poll(() => generated?.executionContext?.persistence?.imagePlanVersionId).toBe('operator-main-version')
+})
+
+test('上传期间退出账号后，旧任务不能借新账号继续分析', async ({ page, context }) => {
+  await mockApi(context)
+  let activeUser = user
+  let releaseUpload
+  const uploaded = new Promise((resolve) => { releaseUpload = resolve })
+  let uploadStarted = false
+  let modelCalls = 0
+  await context.route('**/api/auth/me', (route) => activeUser ? json(route, { success: true, user: activeUser }) : json(route, { success: false }, 401))
+  await context.route('**/api/auth/logout', (route) => { activeUser = null; return json(route, { success: true }) })
+  await context.route('**/api/auth/login', (route) => { activeUser = { ...user, id: 'other-member' }; return json(route, { success: true, user: activeUser }) })
+  await context.route('**/api/upload', async (route) => {
+    uploadStarted = true
+    await uploaded
+    return json(route, { success: true, images: [{ url: '/api/assets/local/reference/recovery-product.png' }] })
+  })
+  await context.route('**/api/assets/local/reference/recovery-product.png?probe=*', (route) => route.fulfill({ status: 200 }))
+  await context.route('**/api/agent-analyze', (route) => { modelCalls += 1; return route.abort() })
+  await page.goto('/')
+  await page.locator('textarea').first().fill('上一位成员的资料')
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'product.png', mimeType: 'image/png', buffer: Buffer.from('mock') })
+  await page.getByRole('button', { name: '一键生成出图方案' }).click()
+  await expect.poll(() => uploadStarted).toBe(true)
+  await page.getByRole('button', { name: '退出', exact: true }).click()
+  await page.getByLabel('账号或邮箱').fill('other-member')
+  await page.getByLabel('密码').fill('test-password')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page.locator('textarea').first()).toHaveValue('')
+  const settled = page.waitForResponse((response) => response.url().endsWith('/api/upload'))
+  releaseUpload()
+  await settled
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('amazon-image-analysis:v1:other-member'))).toBeNull()
+  await page.waitForTimeout(500)
+  expect(modelCalls).toBe(0)
+  await expect(page.locator('textarea').first()).toHaveValue('')
+})
+
+test('使用记录分页并在筛选时回到第一页', async ({ page, context }) => {
+  await mockApi(context)
+  const requests = []
+  await context.route('**/api/activity?*', (route) => {
+    const params = new URL(route.request().url()).searchParams
+    requests.push({ page: params.get('page'), q: params.get('q') })
+    const current = Number(params.get('page'))
+    return json(route, { success: true, records: [{ ...records[0], title: current === 2 ? '第二页产品' : records[0].title }], pagination: { page: current, total: 21, hasNext: current === 1 } })
+  })
+  await page.goto('/activity')
+  await expect(page.getByText('21 条记录')).toBeVisible()
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByText('第二页产品')).toBeVisible()
+  await expect(page.getByRole('button', { name: '下一页' })).toBeDisabled()
+  await page.getByPlaceholder('搜索产品名称').fill('恢复')
+  await expect(page.getByText('第 1 页')).toBeVisible()
+  await expect.poll(() => requests.at(-1)).toEqual({ page: '1', q: '恢复' })
+})
+
+test('刷新后的策略请求恢复产品资料、参考图和策略，不再调用模型', async ({ page, context }) => {
+  await mockApi(context)
+  const { pending, data } = strategyRecoveryFixture()
+  await page.addInitScript(({ key, pending }) => window.localStorage.setItem(key, JSON.stringify(pending)), { key: `amazon-image-analysis:v1:${user.id}`, pending })
+  let modelCalls = 0
+  await context.route('**/api/agent-analyze', (route) => { modelCalls += 1; return route.abort() })
+  await context.route('**/api/agent-analyze/status/*', (route) => json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data }, pendingPersistence: false }))
+  await page.goto('/')
+  await expect(page.locator('textarea').first()).toHaveValue(pending.listing.listingInfo)
+  await expect(page.locator('.image-plan-group textarea').first()).toHaveValue(data.imagePlans[0].strategyContent)
+  await expect(page.getByAltText('已恢复的产品参考图 1')).toBeVisible()
+  await expect(page.getByRole('button', { name: /开始生成/ })).toBeEnabled()
+  await expect(page.getByText('策略已找回并保存，可以继续编辑和生图。')).toBeVisible()
+  expect(modelCalls).toBe(0)
+})
+
+test('数据库补存后保留用户正在修改的策略', async ({ page, context }) => {
+  await mockApi(context)
+  const { pending, data } = strategyRecoveryFixture()
+  await page.addInitScript(({ key, pending }) => window.localStorage.setItem(key, JSON.stringify(pending)), { key: `amazon-image-analysis:v1:${user.id}`, pending })
+  let releaseRepair
+  const repaired = new Promise((resolve) => { releaseRepair = resolve })
+  let checks = 0
+  await context.route('**/api/agent-analyze/status/*', async (route) => {
+    checks += 1
+    if (checks > 1) {
+      await repaired
+      return json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data }, pendingPersistence: false })
+    }
+    return json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data: { ...data, _meta: { ...data._meta, persistence: undefined, persistenceWarning: '等待补存' }, imagePlans: data.imagePlans.map((plan) => ({ ...plan, databasePlanId: undefined, databasePlanVersionId: undefined })) } }, pendingPersistence: true })
+  })
+  await page.goto('/')
+  const strategy = page.locator('.image-plan-group textarea').first()
+  await expect(strategy).toHaveValue(data.imagePlans[0].strategyContent)
+  await strategy.fill('我自己改的主图策略，不许替换。')
+  releaseRepair()
+  await expect(page.getByText('策略已找回并保存，可以继续编辑和生图。')).toBeVisible()
+  await expect(strategy).toHaveValue('我自己改的主图策略，不许替换。')
+})
+
+test('策略响应断开后只查询原请求，不重复分析', async ({ page, context }) => {
+  await mockApi(context)
+  let modelCalls = 0
+  let returnedData
+  let requestId
+  await context.route('**/api/upload', (route) => json(route, { success: true, images: [{ url: '/api/assets/local/reference/disconnected-product.png' }] }))
+  await context.route('**/api/assets/local/reference/disconnected-product.png?probe=*', (route) => route.fulfill({ status: 200 }))
+  await context.route('**/api/agent-analyze', (route) => {
+    modelCalls += 1
+    const input = route.request().postDataJSON()
+    requestId = route.request().headers()['x-analysis-request-id']
+    returnedData = {
+      productBlueprint: {}, _meta: { requestId, analysisRevision: input.analysisRevision, generatedAt: new Date().toISOString() },
+      imagePlans: input.selectedImageTasks.flatMap(({ type, count }) => Array.from({ length: count }, (_, index) => ({ id: index + 1, taskKey: `${type}-${index + 1}`, taskType: type, strategyContent: `找回的中文策略 ${type}`, promptEn: `Recovered ${type} strategy` })))
+    }
+    return route.abort('failed')
+  })
+  await context.route('**/api/agent-analyze/status/*', (route) => {
+    expect(route.request().url().endsWith(requestId)).toBe(true)
+    return json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data: returnedData }, pendingPersistence: false })
+  })
+  await page.goto('/')
+  await page.locator('textarea').first().fill('断线恢复测试产品')
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'product.png', mimeType: 'image/png', buffer: Buffer.from('mock-product') })
+  await page.getByRole('button', { name: '一键生成出图方案' }).click()
+  await expect(page.getByText('策略已找回并保存，可以继续编辑和生图。')).toBeVisible()
+  await expect(page.locator('.image-plan-group textarea').first()).toHaveValue('找回的中文策略 main')
+  expect(modelCalls).toBe(1)
+  expect(requestId).toMatch(/^analysis-[a-f0-9]{32}$/)
+})
+
+test('选择模板且有八张产品图时，在分析前拦截', async ({ page, context }) => {
+  await mockApi(context)
+  const template = { id: 'layout-limit', name: '数量限制模板', scope: 'PUBLIC', imageUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' }
+  await context.route('**/api/templates?scope=*', (route) => json(route, { success: true, templates: [template] }))
+  let analysisCalls = 0
+  await context.route('**/api/agent-analyze', (route) => { analysisCalls += 1; return route.abort() })
+  await page.goto('/')
+  await page.locator('textarea').first().fill('参考图数量限制产品')
+  await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 8 }, (_, index) => ({
+    name: `product-${index}.svg`, mimeType: 'image/svg+xml',
+    buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384"><rect width="384" height="384" fill="pink"/></svg>')
+  })))
+  await expect(page.getByText(/已上传 8/)).toBeVisible()
+  await page.getByRole('button', { name: /选择卖点排版/ }).click()
+  const dialog = page.getByRole('dialog', { name: '设置卖点图排版参考' })
+  await dialog.getByRole('button', { name: template.name, exact: true }).click()
+  await dialog.getByRole('button', { name: '确认' }).click()
+  await page.getByRole('button', { name: '一键生成出图方案' }).click()
+  await expect(page.getByText(/选择模板后最多使用 7 张产品图/)).toBeVisible()
+  expect(analysisCalls).toBe(0)
+})
+
+test('恢复期间修改产品资料时，旧策略不覆盖新资料', async ({ page, context }) => {
+  await mockApi(context)
+  const { pending, data } = strategyRecoveryFixture()
+  await page.addInitScript(({ key, pending }) => window.localStorage.setItem(key, JSON.stringify(pending)), { key: `amazon-image-analysis:v1:${user.id}`, pending })
+  let releaseResult
+  const resultHeld = new Promise((resolve) => { releaseResult = resolve })
+  await context.route('**/api/agent-analyze/status/*', async (route) => {
+    await resultHeld
+    return json(route, { success: true, status: 'SUCCEEDED', result: { success: true, data }, pendingPersistence: false })
+  })
+  await page.goto('/')
+  await page.locator('textarea').first().fill('这是用户新填写的产品资料')
+  releaseResult()
+  await expect(page.getByText('原策略已找回，当前资料已变化，未替换页面内容。')).toBeVisible()
+  await expect(page.locator('textarea').first()).toHaveValue('这是用户新填写的产品资料')
+  await expect(page.locator('.image-plan-group textarea').first()).toHaveValue('')
+})
 
 test('使用记录在当前列表中打开详情抽屉', async ({ page, context }) => {
   await mockApi(context)

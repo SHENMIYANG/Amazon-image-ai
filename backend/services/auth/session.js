@@ -9,6 +9,9 @@ function getSessionDays() {
 }
 
 export function isAuthEnabled() {
+  if (process.env.NODE_ENV === 'production' && (!isPersistenceEnabled() || process.env.AUTH_ENABLED === 'false')) {
+    throw new Error('生产环境必须配置 DATABASE_URL 并启用身份验证。')
+  }
   return isPersistenceEnabled() && process.env.AUTH_ENABLED !== 'false'
 }
 

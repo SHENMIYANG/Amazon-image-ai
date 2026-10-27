@@ -6,6 +6,9 @@ npm-debug.log
 .env
 .env.local
 .env.*.local
+backend/.env*
+backend/uploads/
+backend/logs/
 
 # Build output (will be generated during build)
 frontend/dist/

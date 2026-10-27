@@ -63,8 +63,19 @@ export function normalizeStrategyPlans({
   strategyPlans = [],
   productBlueprint = {}
 } = {}) {
+  const plansByKey = new Map()
+  const requestedKeys = new Set(requestedTasks.map((task) => task.taskKey))
+  for (const plan of strategyPlans) {
+    if (!requestedKeys.has(plan?.taskKey) || plansByKey.has(plan.taskKey)) {
+      throw Object.assign(new Error('策略任务编号缺失、重复或与请求不符，请检查模型返回。'), { statusCode: 502 })
+    }
+    plansByKey.set(plan.taskKey, plan)
+  }
+  if (plansByKey.size !== requestedTasks.length) {
+    throw Object.assign(new Error('模型未返回所有任务的策略。'), { statusCode: 502 })
+  }
   return requestedTasks.map((requestedTask, index) => {
-    const plan = strategyPlans[index] || {}
+    const plan = plansByKey.get(requestedTask.taskKey)
 
     const rawStrategyContent = String(plan.strategyContent || '').trim()
     const normalizedCopy = requestedTask.taskType === 'main'

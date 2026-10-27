@@ -186,6 +186,20 @@ server {
         proxy_read_timeout 60s;
     }
 
+    location ~ ^/api/(agent-analyze|generate)/status/ {
+        limit_req zone=amazon_status_limit burst=60 nodelay;
+        limit_conn amazon_per_ip_conn 20;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
     location ~ ^/api/(upload|agent-analyze|generate|prompt-preview|image-feedback|workspace-chat) {
         limit_req zone=amazon_api_limit burst=20 nodelay;
         limit_conn amazon_per_ip_conn 5;
@@ -265,6 +279,20 @@ server {
         proxy_read_timeout 60s;
     }
 
+    location ~ ^/api/(agent-analyze|generate)/status/ {
+        limit_req zone=amazon_status_limit burst=60 nodelay;
+        limit_conn amazon_per_ip_conn 20;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
     location ~ ^/api/(upload|agent-analyze|generate|prompt-preview|image-feedback|workspace-chat) {
         limit_req zone=amazon_api_limit burst=20 nodelay;
         limit_conn amazon_per_ip_conn 5;
@@ -305,6 +333,7 @@ write_nginx_limits() {
   cat > "$NGINX_LIMITS_CONF" <<EOF
 limit_req_zone \$binary_remote_addr zone=amazon_login_limit:10m rate=5r/m;
 limit_req_zone \$binary_remote_addr zone=amazon_api_limit:10m rate=20r/m;
+limit_req_zone \$binary_remote_addr zone=amazon_status_limit:10m rate=600r/m;
 limit_conn_zone \$binary_remote_addr zone=amazon_per_ip_conn:10m;
 EOF
 }

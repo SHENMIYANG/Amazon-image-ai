@@ -196,7 +196,7 @@ function buildCompletedImageState(image = {}, generatedImage = {}, fallbackPlan 
     prompt: generatedImage.prompt || generatedImage.executionPromptEn || image.prompt || '',
     promptDirty: false,
     regenerationError: null,
-    persistenceWarning: generatedImage.persistenceWarning || null,
+    persistenceWarning: [generatedImage.persistenceWarning, generatedImage.storageWarning].filter(Boolean).join(' ') || null,
     actualResolution: generatedImage.actualResolution || null,
     requestedResolution: generatedImage.resolution || image.requestedResolution,
     sizeMatchesRequest: generatedImage.sizeMatchesRequest
@@ -324,7 +324,7 @@ const ANALYSIS_INVALIDATING_FIELDS = new Set([
   'complexity'
 ])
 
-function App() {
+function App({ onSessionChange }) {
   const [listing, setListing] = useState({
     listingInfo: '',
     productName: '',
@@ -361,6 +361,11 @@ function App() {
   const [stopping, setStopping] = useState(false)
   const [currentTaskId, setCurrentTaskId] = useState(null)
   const stoppingRef = useRef(false)
+  const sessionActiveRef = useRef(true)
+  useEffect(() => {
+    sessionActiveRef.current = true
+    return () => { sessionActiveRef.current = false; stoppingRef.current = true }
+  }, [])
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -545,7 +550,9 @@ function App() {
 
   useEffect(() => {
     const handleUnauthorized = () => {
-      setCurrentUser(null)
+      sessionActiveRef.current = false
+      stoppingRef.current = true
+      onSessionChange()
     }
     window.addEventListener('auth:unauthorized', handleUnauthorized)
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
@@ -576,15 +583,20 @@ function App() {
     setCurrentUser(data.user)
     window.history.replaceState({}, '', '/')
     setPathname('/')
+    onSessionChange()
   }
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
-    } finally {
-      setCurrentUser(null)
+      const response = await fetch('/api/auth/logout', { method: 'POST' })
+      if (!response.ok) throw new Error('退出失败，请重试。')
       window.history.replaceState({}, '', '/')
       setPathname('/')
+      sessionActiveRef.current = false
+      stoppingRef.current = true
+      onSessionChange()
+    } catch (error) {
+      alert(error.message || '退出失败，请重试。')
     }
   }
 
@@ -653,7 +665,7 @@ function App() {
 
     if (field === 'selectedImageTasks') {
       setListing((prev) => {
-        const reductionOnly = isTaskConfigReductionOnly(prev.selectedImageTasks, value)
+        const reductionOnly = !analyzing && isTaskConfigReductionOnly(prev.selectedImageTasks, value)
 
         if (reductionOnly) {
           return {
@@ -729,15 +741,41 @@ function App() {
     })
   }
 
+  const handleRecoveredStrategy = (result, recovery) => {
+    const mayRestoreReferences = recovery.restore && !listing.imagePlans?.some((plan) => plan.strategyContent?.trim()) && !listing.listingInfo && !listing.productName && !Number(listing._meta?.analysisRevision || 0)
+    if (recovery.restore && !mayRestoreReferences && listing._meta?.requestId !== recovery.requestId) return false
+    if (!mayRestoreReferences && Number(listing._meta?.analysisRevision || 0) !== recovery.requestedAnalysisRevision) return false
+    setListing((prev) => {
+      const sameRequest = prev._meta?.requestId === recovery.requestId
+      const blankAfterRefresh = recovery.restore && !prev.imagePlans?.some((plan) => plan.strategyContent?.trim()) && !prev.listingInfo && !prev.productName && !Number(prev._meta?.analysisRevision || 0)
+      if (recovery.restore && !sameRequest && !blankAfterRefresh) return prev
+      if (!blankAfterRefresh && Number(prev._meta?.analysisRevision || 0) !== recovery.requestedAnalysisRevision) return prev
+      if (sameRequest) {
+        return {
+          ...prev,
+          _meta: { ...prev._meta, persistence: result._meta?.persistence, persistenceWarning: result._meta?.persistenceWarning },
+          imagePlans: prev.imagePlans.map((plan) => {
+            const restored = result.imagePlans.find((item) => item.taskKey === plan.taskKey)
+            return restored ? { ...plan, databasePlanId: restored.databasePlanId, databasePlanVersionId: plan.promptDirty ? null : plan.databasePlanVersionId || restored.databasePlanVersionId } : plan
+          })
+        }
+      }
+      const source = blankAfterRefresh ? recovery.listing : prev
+      validateAnalyzedPlans(result.imagePlans, source.selectedImageTasks, source.layoutTemplates)
+      return { ...source, ...result, imagePlans: result.imagePlans.map(normalizeImagePlan), _meta: { ...result._meta, requiresReanalysis: false } }
+    })
+    if (mayRestoreReferences) setUploadedReferenceImages(recovery.referenceImages)
+    return true
+  }
+
   const syncStrategyTranslations = async (plansOverride = null, targetPlanTaskKeys = null) => {
     const plans = Array.isArray(plansOverride) ? plansOverride : buildDefaultPlansFromTasks(listing.selectedImageTasks, listing.imagePlans || [], listing.layoutTemplates)
     const targetTaskKeySet = Array.isArray(targetPlanTaskKeys) && targetPlanTaskKeys.length > 0 ? new Set(targetPlanTaskKeys) : null
     const dirtyPlans = plans.filter(
       (plan) =>
         (!targetTaskKeySet || targetTaskKeySet.has(plan.taskKey)) &&
-        plan.taskType !== 'main' &&
         String(plan.strategyContent || '').trim() &&
-        (plan.promptDirty || !String(plan.promptEn || '').trim())
+        (plan.promptDirty || (plan.taskType !== 'main' && !String(plan.promptEn || '').trim()))
     )
 
     if (dirtyPlans.length === 0) {
@@ -757,6 +795,7 @@ function App() {
       const translatedByTaskKey = new Map()
 
       for (const plan of dirtyPlans) {
+        if (!sessionActiveRef.current) return null
         const response = await fetch('/api/prompt-preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -772,6 +811,7 @@ function App() {
         })
 
         const data = await parseApiJson(response, `策略英文执行稿接口（图${plan.id}）`)
+        if (!sessionActiveRef.current) return null
         translatedByTaskKey.set(plan.taskKey, {
           promptEn: data.data?.promptEn || '',
           databasePlanVersionId: data.persistenceWarning
@@ -800,11 +840,12 @@ function App() {
           if (!translatedPlan || !translatedByTaskKey.has(currentPlan.taskKey)) return currentPlan
 
           const contentChangedDuringSave = String(currentPlan.strategyContent || '').trim() !== String(translatedPlan.strategyContent || '').trim()
+            || JSON.stringify(currentPlan.executionRules || []) !== JSON.stringify(translatedPlan.executionRules || [])
 
           return {
             ...currentPlan,
             promptEn: contentChangedDuringSave ? '' : translatedPlan.promptEn,
-            databasePlanVersionId: contentChangedDuringSave ? currentPlan.databasePlanVersionId : translatedPlan.databasePlanVersionId,
+            databasePlanVersionId: contentChangedDuringSave ? null : translatedPlan.databasePlanVersionId,
             persistenceWarning: contentChangedDuringSave ? currentPlan.persistenceWarning : translatedPlan.persistenceWarning,
             promptDirty: contentChangedDuringSave
           }
@@ -828,6 +869,10 @@ function App() {
 
   const handleGenerate = async () => {
     if (generating) return
+    if (currentUser && (!listing._meta?.persistence?.workspaceId || listing.imagePlans.some((plan) => !plan.databasePlanId || !plan.databasePlanVersionId))) {
+      alert('策略记录尚未保存。请等待补存完成；如果修改过策略，请先保存本图策略或英文执行稿。无需重复生成策略。')
+      return
+    }
     if (listing._meta?.requiresReanalysis) {
       alert('产品资料、产品图、任务或模板已经变化。请重新生成策略后再生图。')
       return
@@ -940,7 +985,7 @@ function App() {
       for (let i = 0; i < allPlans.length; i++) {
         const plan = allPlans[i]
 
-        if (stoppingRef.current) {
+        if (stoppingRef.current || !sessionActiveRef.current) {
           console.log('用户取消生成')
           setTasks((prev) =>
             prev.map((task) => {
@@ -1151,6 +1196,7 @@ function App() {
       }
       const primaryReferenceImageUrl = task.primaryReferenceImageUrl || getPrimaryReferenceImageUrl(task.referenceImages || [])
       const additionalReferenceImages = await uploadReferenceFiles(referenceFiles, `图${image.imageId}追加参考图上传接口`)
+      if (!sessionActiveRef.current) return null
       const regenerationReferenceImages = [...(task.referenceImages || []), ...providedReferenceImageUrls, ...additionalReferenceImages].filter(
         (url, index, source) => url && source.indexOf(url) === index
       )
@@ -1317,7 +1363,7 @@ function App() {
     for (let i = 0; i < pendingPlans.length; i++) {
       const plan = pendingPlans[i]
 
-      if (stoppingRef.current) {
+      if (stoppingRef.current || !sessionActiveRef.current) {
         console.log('用户取消生成')
         aborted = true
         setTasks((prev) =>
@@ -1501,7 +1547,7 @@ function App() {
       alert('批量下载失败：' + error.message)
     }
   }
-  const canGenerate = (listing.productName || listing.listingInfo) && productImages.length > 0 && !listing._meta?.requiresReanalysis
+  const canGenerate = (listing.productName || listing.listingInfo) && (productImages.length > 0 || uploadedReferenceImages.length > 0) && !listing._meta?.requiresReanalysis
   const selectedImageCount = getSelectedImageTaskCount(listing.selectedImageTasks)
   const pageRoute = getPageRoute(pathname)
 
@@ -1579,6 +1625,10 @@ function App() {
                   }))
                 }}
               />
+              {productImages.length === 0 && uploadedReferenceImages.length > 0 && <div>
+                <p>已恢复 {uploadedReferenceImages.length} 张产品参考图，可继续生成；上传新图片会使旧策略失效。</p>
+                {uploadedReferenceImages.map((url, index) => <a key={url} href={url} target="_blank" rel="noreferrer"><img src={url} alt={`已恢复的产品参考图 ${index + 1}`} width="72" height="72" style={{ objectFit: 'contain' }} /></a>)}
+              </div>}
             </section>
 
             <section className="section workspace-panel">
@@ -1610,6 +1660,9 @@ function App() {
                     onReferenceImagesChange={setUploadedReferenceImages}
                     onAnalyzeComplete={handleAgentAnalyzeComplete}
                     onAnalyzingChange={setAnalyzing}
+                    onRecoverComplete={handleRecoveredStrategy}
+                    recoveryKey={currentUser?.id || 'local'}
+                    isSessionActive={() => sessionActiveRef.current}
                   />
                 }
               />
@@ -1665,4 +1718,7 @@ function App() {
   )
 }
 
-export default App
+export default function SessionWorkbench() {
+  const [session, setSession] = useState(0)
+  return <App key={session} onSessionChange={() => setSession((value) => value + 1)} />
+}

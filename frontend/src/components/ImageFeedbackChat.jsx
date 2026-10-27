@@ -149,7 +149,7 @@ export default function ImageFeedbackChat({
   }
 
   const uploadImages = async (event) => {
-    const remainingSlots = Math.max(0, 8 - attachments.length)
+    const remainingSlots = Math.max(0, 7 - attachments.length)
     const files = Array.from(event.target.files || [])
       .filter((file) => file.type.startsWith('image/'))
       .slice(0, remainingSlots)
@@ -179,7 +179,7 @@ export default function ImageFeedbackChat({
         mimetype: item.mimetype
       })).filter((item) => item.url)
 
-      const nextAttachments = [...attachments, ...uploaded].slice(0, 8)
+      const nextAttachments = [...attachments, ...uploaded].slice(0, 7)
       appendAndSave(messages, {
         role: 'assistant',
         content: `已添加 ${uploaded.length} 张当前图片反馈参考图。生成时会一起用于这张图的单张重生。`
@@ -411,7 +411,7 @@ export default function ImageFeedbackChat({
                   type="button"
                   className="feedback-chat-upload"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={loading || generating || uploading || attachments.length >= 8}
+                  disabled={loading || generating || uploading || attachments.length >= 7}
                 >
                   <AttachmentIcon />
                   <span>{uploading ? '上传中...' : '添加图片'}</span>

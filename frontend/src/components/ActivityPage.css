@@ -408,6 +408,24 @@
   height: 100%;
   object-fit: cover;
 }
+.activity-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.activity-pagination button {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #e2e6ea;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.activity-pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .activity-prompt-details {
   margin-top: 0.65rem;
   border: 1px solid #e2e6ea;

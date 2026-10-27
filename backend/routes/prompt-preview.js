@@ -28,7 +28,9 @@ router.post('/', async (req, res) => {
       })
     }
 
-    const normalizedPlan = await translatePlanPromptIfNeeded(
+    const normalizedPlan = plan.taskType === 'main'
+      ? { ...plan, strategyContent, originalPrompt: strategyContent, promptEn: '', promptDirty: false }
+      : await translatePlanPromptIfNeeded(
       {
         ...plan,
         strategyContent
@@ -64,6 +66,8 @@ router.post('/', async (req, res) => {
       error: 'Prompt preview failed',
       message: error.message
     })
+  } finally {
+    res.locals.releaseModelRequest?.()
   }
 })
 

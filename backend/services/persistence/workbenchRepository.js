@@ -88,8 +88,10 @@ export async function getAccessibleAsset({ storageProvider, objectKey, actor = n
         {
           layoutTemplate: {
             is: {
-              archivedAt: null,
-              OR: [{ scope: 'PUBLIC' }, { scope: 'PERSONAL', createdById: actor.userId }]
+              OR: [
+                { archivedAt: null, OR: [{ scope: 'PUBLIC' }, { scope: 'PERSONAL', createdById: actor.userId }] },
+                { archivedAt: { not: null }, planVersions: { some: { imagePlan: { strategyRun: { workspace: workspaceAccessScope(actor.organizationId, actor) } } } } }
+              ]
             }
           }
         },
@@ -277,6 +279,18 @@ export async function persistStrategyResult({ input, output, requestId, model, d
     if (!db) return null
 
     return await db.$transaction(async (tx) => {
+      const existing = await tx.strategyRun.findUnique({
+        where: { requestId },
+        include: { workspace: true, inputVersion: { include: { references: true } }, imagePlans: { include: { versions: { where: { version: 1 } } } } }
+      })
+      if (existing) {
+        if (actor && (existing.workspace.organizationId !== actor.organizationId || existing.imagePlans[0]?.versions[0]?.createdById !== actor.userId)) return null
+        return {
+          workspaceId: existing.workspaceId, inputVersionId: existing.inputVersionId, strategyRunId: existing.id,
+          referenceAssetIds: existing.inputVersion.references.map((reference) => reference.assetId),
+          imagePlans: existing.imagePlans.map((plan) => ({ taskKey: plan.taskKey, imagePlanId: plan.id, imagePlanVersionId: plan.versions[0]?.id }))
+        }
+      }
       const organization = actor?.organizationId
         ? await tx.organization.findUnique({ where: { id: actor.organizationId } })
         : await getDefaultOrganization(tx)
@@ -366,6 +380,29 @@ export async function persistStrategyResult({ input, output, requestId, model, d
   } catch (error) {
     console.error('[persistence] failed to save strategy result', { requestId, message: error.message })
     return null
+  }
+}
+
+export async function getStrategyResultByRequestId({ requestId, actor = null }) {
+  if (!isPersistenceEnabled()) return null
+  const db = await getDatabaseClient()
+  const run = await db.strategyRun.findUnique({
+    where: { requestId },
+    include: { workspace: { select: { organizationId: true, deletedAt: true } }, modelRequests: { where: { type: 'STRATEGY' }, select: { actorId: true } }, inputVersion: { include: { references: true } }, imagePlans: { include: { versions: { where: { version: 1 } } } } }
+  })
+  if (!run) return null
+  if (actor && (run.workspace.organizationId !== actor.organizationId || run.workspace.deletedAt || !run.modelRequests.some((request) => request.actorId === actor.userId))) return { inaccessible: true }
+  return {
+    output: {
+      productBlueprint: run.productBlueprint,
+      imagePlans: run.rawResponse?.imagePlans || [],
+      _meta: { requestId, generatedAt: run.completedAt, analysisRevision: Number(run.inputVersion.inputSnapshot?.analysisRevision || 0) }
+    },
+    persistence: {
+      workspaceId: run.workspaceId, inputVersionId: run.inputVersionId, strategyRunId: run.id,
+      referenceAssetIds: run.inputVersion.references.map((reference) => reference.assetId),
+      imagePlans: run.imagePlans.map((plan) => ({ taskKey: plan.taskKey, imagePlanId: plan.id, imagePlanVersionId: plan.versions[0]?.id }))
+    }
   }
 }
 
@@ -667,8 +704,12 @@ export async function persistGenerationResult({ executionContext, images, model,
           createdById: actor?.userId || null
       }
       const existingRun = generationRunId
-        ? await tx.generationRun.findFirst({ where: { id: generationRunId, workspaceId, imagePlanId }, select: { id: true } })
+        ? await tx.generationRun.findFirst({ where: { id: generationRunId, workspaceId, imagePlanId }, include: { generatedImages: true } })
         : null
+      if ((existingRun?.status === 'SUCCEEDED' && existingRun.generatedImages.length) ||
+          (existingRun?.status === 'FAILED' && completedImages.length === 0)) {
+        return { generationRunId: existingRun.id }
+      }
       const generationRun = existingRun
         ? await tx.generationRun.update({ where: { id: existingRun.id }, data: generationRunData })
         : await tx.generationRun.create({ data: generationRunData })
@@ -741,57 +782,6 @@ export async function persistGenerationResult({ executionContext, images, model,
     })
   } catch (error) {
     console.error('[persistence] failed to save generation result', { workspaceId, imagePlanId, message: error.message })
-    if (generationRunId) {
-      try {
-        const db = await getDatabaseClient()
-        const completedImages = (Array.isArray(images) ? images : []).filter((image) => image?.status === 'completed' && image.imageUrl)
-        if (db && completedImages.length) {
-          await db.$transaction(async (tx) => {
-            const workspace = await tx.productWorkspace.findUnique({ where: { id: workspaceId }, select: { organizationId: true } })
-            if (!workspace) throw new Error('工作区不存在，无法补记图片。')
-            for (const image of completedImages) {
-              const reference = assetReference(image.imageUrl)
-              const asset = reference ? await tx.asset.upsert({
-                where: { storageProvider_objectKey: reference },
-                update: { publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey) },
-                create: {
-                  organizationId: workspace.organizationId,
-                  workspaceId,
-                  storageProvider: reference.storageProvider,
-                  objectKey: reference.objectKey,
-                  publicUrl: buildAssetUrl(reference.storageProvider, reference.objectKey),
-                  mimeType: 'image/png',
-                  role: 'GENERATED_IMAGE',
-                  createdById: actor?.userId || null
-                }
-              }) : null
-              await tx.generatedImage.create({
-                data: {
-                  generationRunId,
-                  assetId: asset?.id || null,
-                  imageUrlSnapshot: image.imageUrl,
-                  width: image.actualWidth || image.width || null,
-                  height: image.actualHeight || image.height || null,
-                  requestResolution: image.resolution || executionContext?.output?.resolution || null,
-                  actualResolution: image.actualResolution || null
-                }
-              })
-            }
-            await tx.generationRun.update({
-              where: { id: generationRunId },
-              data: { status: 'SUCCEEDED', completedAt: new Date(), errorMessage: '图片已生成，部分记录保存失败。' }
-            })
-          })
-        } else if (db) {
-          await db.generationRun.updateMany({
-            where: { id: generationRunId, workspaceId, imagePlanId },
-            data: { status: 'FAILED', completedAt: new Date(), errorMessage: '生成结果保存失败，请检查使用记录。' }
-          })
-        }
-      } catch (finalizeError) {
-        console.error('[persistence] failed to finalize generation run', { generationRunId, message: finalizeError.message })
-      }
-    }
     return null
   }
 }
@@ -812,7 +802,9 @@ function serializeGenerationRun(run) {
       actualResolution: image.actualResolution,
       actualWidth: image.width,
       actualHeight: image.height,
-      sizeMatchesRequest: true
+      sizeMatchesRequest: image.width && image.height && image.requestResolution
+        ? `${image.width}x${image.height}` === image.requestResolution
+        : null
     }))
   }
 }

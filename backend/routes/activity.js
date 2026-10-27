@@ -6,6 +6,11 @@ import { buildAssetUrl } from '../services/storage.js'
 
 const router = express.Router()
 
+export function getActivityPagination(query = {}) {
+  const page = Math.min(1000000, Math.max(1, Math.floor(Number(query.page) || 1)))
+  return { page, pageSize: 20, skip: (page - 1) * 20 }
+}
+
 function unavailable(res) {
   return res.status(503).json({ success: false, message: '使用记录需要先配置并迁移 PostgreSQL。' })
 }
@@ -198,9 +203,12 @@ router.get('/', async (req, res, next) => {
     if (stage === 'generated') where.generationRuns = { some: { status: 'SUCCEEDED' } }
     if (stage === 'failed') where.generationRuns = { some: { status: 'FAILED' } }
 
-    const workspaces = await db.productWorkspace.findMany({
+    const { page, pageSize, skip } = getActivityPagination(req.query)
+    const [total, workspaces] = await Promise.all([db.productWorkspace.count({ where }), db.productWorkspace.findMany({
       where,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      skip,
+      take: pageSize,
       include: {
         createdBy: { select: { id: true, loginName: true, displayName: true } },
         inputVersions: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, version: true, createdAt: true, inputSnapshot: true } },
@@ -216,9 +224,9 @@ router.get('/', async (req, res, next) => {
         },
         _count: { select: { inputVersions: true, strategyRuns: true, generationRuns: true, feedbackThreads: true } }
       }
-    })
+    })])
 
-    res.json({ success: true, canReadAll: canReadAll(req.auth), records: workspaces.map(serializeWorkspaceSummary) })
+    res.json({ success: true, canReadAll: canReadAll(req.auth), records: workspaces.map(serializeWorkspaceSummary), pagination: { page, pageSize, total, hasNext: skip + workspaces.length < total } })
   } catch (error) {
     next(error)
   }

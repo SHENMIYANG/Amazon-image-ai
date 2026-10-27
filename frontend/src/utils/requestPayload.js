@@ -291,6 +291,9 @@ export function buildGenerateRequest(
   const executionReferenceImages = templateUrl && !referenceImages.includes(templateUrl)
     ? [...referenceImages, templateUrl]
     : referenceImages
+  if (new Set(executionReferenceImages.filter(Boolean)).size > 8) {
+    throw new Error('生图最多支持 8 张参考图，模板和重绘参考图也占名额。请减少产品图后重新分析。')
+  }
   const executionReferenceImageRoles = templateUrl
     ? [...referenceImageRoles.filter((item) => item.url !== templateUrl), { url: templateUrl, role: 'layout_style_reference' }]
     : referenceImageRoles

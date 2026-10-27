@@ -1,4 +1,5 @@
 import express from 'express'
+import path from 'path'
 import { getAccessibleAsset } from '../services/persistence/workbenchRepository.js'
 import { readAssetBuffer } from '../services/storage.js'
 import { isAuthEnabled } from '../services/auth/session.js'
@@ -14,9 +15,10 @@ router.get('/:storageProvider/*', async (req, res, next) => {
       return res.status(404).json({ success: false, message: '图片不存在或当前账号无权访问。' })
     }
 
-    if (asset.mimeType) res.type(asset.mimeType)
+    res.type(asset?.mimeType || path.extname(objectKey))
     res.send(await readAssetBuffer(storageProvider, objectKey))
   } catch (error) {
+    if (error.code === 'ENOENT' || error.name === 'NoSuchKey') return res.status(404).json({ success: false, message: '图片不存在。' })
     next(error)
   }
 })

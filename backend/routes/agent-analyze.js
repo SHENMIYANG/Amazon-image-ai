@@ -14,9 +14,12 @@ import {
   extractSellingPointList as extractAgentSellingPointList,
   getComplexityDefinition as getAgentComplexityDefinition
 } from '../services/agent/strategyPrompt.js'
-import { assertAccessibleAssetUrls, persistStrategyResult } from '../services/persistence/workbenchRepository.js'
+import { assertAccessibleAssetUrls, getStrategyResultByRequestId } from '../services/persistence/workbenchRepository.js'
 import { getDatabaseClient } from '../services/persistence/client.js'
 import { buildAssetUrl } from '../services/storage.js'
+import { assertReferenceBudget } from '../utils/referenceLimits.js'
+import { claimRequest, readRequest, updateRequest, failRequest } from '../services/persistence/requestJournal.js'
+import { attachStrategyPersistence, recordCompletedResult, repairRecordedResult } from '../services/persistence/resultRecovery.js'
 
 const router = express.Router()
 const MAX_STRATEGY_REFERENCE_IMAGES = 16
@@ -399,12 +402,29 @@ export function getIncompleteStrategyPlanIds(plans = []) {
     .map((plan) => plan.id)
 }
 
+router.get('/status/:requestId', async (req, res, next) => {
+  try {
+    let entry = readRequest('strategy', req.params.requestId, req.auth)
+    if (!entry) {
+      const saved = await getStrategyResultByRequestId({ requestId: req.params.requestId, actor: req.auth })
+      if (saved?.output) return res.json({ success: true, status: 'SUCCEEDED', result: { success: true, data: attachStrategyPersistence(saved.output, saved.persistence) }, pendingPersistence: false })
+      return res.status(404).json({ success: false, status: 'NOT_FOUND', message: '没有找到这次策略请求。' })
+    }
+    if (entry.pendingPersistence) entry = await repairRecordedResult(entry)
+    res.json({ success: true, status: entry.status, result: entry.result, message: entry.message, pendingPersistence: entry.pendingPersistence })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/', async (req, res) => {
-  const requestId = createAgentRequestId()
+  const requestId = String(req.get('X-Analysis-Request-Id') || '').trim() || createAgentRequestId()
   const startedAt = Date.now()
   let clientClosed = false
+  let journal
+  let ownsRequest = false
 
-  req.on('close', () => {
+  res.on('close', () => {
     if (!res.writableEnded) {
       clientClosed = true
       logAgentAnalyze('client_closed', {
@@ -415,6 +435,20 @@ router.post('/', async (req, res) => {
   })
 
   try {
+    const claimed = claimRequest('strategy', requestId, req.auth, req.body)
+    journal = claimed.entry
+    ownsRequest = !claimed.existing
+    if (claimed.existing) {
+      if (journal.pendingPersistence) journal = await repairRecordedResult(journal)
+      if (journal.result) return res.json(journal.result)
+      return res.status(journal.status === 'RUNNING' ? 202 : 409).json({ success: false, status: journal.status, requestId, message: journal.message || '策略任务仍在处理，请用原请求编号查询。' })
+    }
+    const saved = await getStrategyResultByRequestId({ requestId, actor: req.auth })
+    if (saved?.inaccessible) throw Object.assign(new Error('该请求编号已使用，当前账号无法访问原任务。'), { statusCode: 409 })
+    if (saved) {
+      journal = updateRequest(journal, { status: 'SUCCEEDED', result: { success: true, data: attachStrategyPersistence(saved.output, saved.persistence) } })
+      return res.json(journal.result)
+    }
     const {
       productName,
       listingInfo,
@@ -465,6 +499,7 @@ router.post('/', async (req, res) => {
     }
 
     const layoutTemplates = await getSelectedLayoutTemplates(layoutTemplateIds, req.auth)
+    assertReferenceBudget(referenceImages, layoutTemplates.length ? 1 : 0)
     let requestedTasks
     try {
       requestedTasks = bindLayoutTemplatesToTasks(expandSelectedImageTasks(selectedImageTasks), layoutTemplates)
@@ -659,18 +694,7 @@ router.post('/', async (req, res) => {
     }
     // Intentionally do not hard-block on blueprint quality checks here.
     // The operator should always be able to review and edit the generated strategy first.
-    const strategyPlans = strategyTasks.map((task, index) => strategyResult.imagePlans[index] || {
-      taskKey: task.taskKey,
-      name: task.name,
-      type: task.taskType,
-      imageRole: '',
-      sellingFocus: '',
-      currentImageProductUsage: {},
-      executionRules: [],
-      copy: [],
-      strategyContent: '',
-      promptEn: ''
-    })
+    const strategyPlans = strategyResult.imagePlans
 
     const normalizedPlans = normalizeAgentStrategyPlans({
       requestedTasks,
@@ -708,7 +732,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const persistence = await persistStrategyResult({
+    const persistencePayload = {
       input: {
         ...req.body,
         workspaceId,
@@ -720,26 +744,14 @@ router.post('/', async (req, res) => {
       model,
       durationMs: Date.now() - startedAt,
       actor: req.auth
-    })
-
-    responseData = applyStrategyPersistenceResult(responseData, persistence, Boolean(req.auth))
-
-    if (persistence) {
-      const planIdsByTaskKey = new Map(
-        persistence.imagePlans.map((plan) => [plan.taskKey, plan])
-      )
-      responseData.imagePlans = responseData.imagePlans.map((plan) => ({
-        ...plan,
-        databasePlanId: planIdsByTaskKey.get(plan.taskKey)?.imagePlanId,
-        databasePlanVersionId: planIdsByTaskKey.get(plan.taskKey)?.imagePlanVersionId
-      }))
-      responseData._meta.persistence = {
-        workspaceId: persistence.workspaceId,
-        inputVersionId: persistence.inputVersionId,
-        strategyRunId: persistence.strategyRunId,
-        referenceAssetIds: persistence.referenceAssetIds
-      }
     }
+    const initialData = req.auth ? attachStrategyPersistence(responseData, null) : responseData
+    journal = await recordCompletedResult(journal, persistencePayload, {
+      success: true,
+      data: initialData,
+      persistenceWarning: initialData._meta.persistenceWarning || undefined,
+      usage: { combined: combinedCompletion.usage || null }
+    })
 
     logAgentAnalyze('success', {
       requestId,
@@ -748,16 +760,10 @@ router.post('/', async (req, res) => {
       clientClosed
     })
 
-    res.json({
-      success: true,
-      data: responseData,
-      persistenceWarning: responseData._meta.persistenceWarning || undefined,
-      usage: {
-        combined: combinedCompletion.usage || null
-      }
-    })
+    res.json(journal.result)
   } catch (error) {
     const status = getErrorStatus(error)
+    if (ownsRequest) failRequest(journal, error.message)
     console.error('[agent-analyze] failed', {
       requestId,
       status,
@@ -778,6 +784,7 @@ router.post('/', async (req, res) => {
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     })
   } finally {
+    if (ownsRequest) failRequest(journal, '策略请求未完成，请检查错误详情。')
     res.locals.releaseModelRequest?.()
   }
 })

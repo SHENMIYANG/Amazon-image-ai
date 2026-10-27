@@ -12,6 +12,9 @@ import {
   normalizeStringArray
 } from '../utils/productModel.js'
 import { postJsonWithRetry } from '../utils/upstreamRetry.js'
+import { getMaxReferenceImages } from '../utils/referenceLimits.js'
+import { claimRequest, readRequest, updateRequest, failRequest } from '../services/persistence/requestJournal.js'
+import { recordCompletedResult, repairRecordedResult } from '../services/persistence/resultRecovery.js'
 import { normalizeVisualBlueprint } from '../utils/visualBlueprints.js'
 import { materializeAssetUrls, writeAsset } from '../services/storage.js'
 import {
@@ -32,13 +35,6 @@ function getGenerationRequestId(req) {
     : `generation-${Date.now()}-${Math.round(Math.random() * 1000000)}`
 }
 
-function getMaxReferenceImages() {
-  const configuredLimit = Number(process.env.IMAGE_MAX_REFERENCE_IMAGES || 8)
-  return Number.isFinite(configuredLimit)
-    ? Math.max(1, Math.min(8, Math.floor(configuredLimit)))
-    : 8
-}
-
 export function buildGenerationSuccessResponse({ images, persistence, persistenceRequired }) {
   const response = {
     success: true,
@@ -56,6 +52,15 @@ export function buildGenerationSuccessResponse({ images, persistence, persistenc
 
 router.get('/status/:requestId', async (req, res, next) => {
   try {
+    let recorded = readRequest('generation', req.params.requestId, req.auth)
+    if (recorded?.pendingPersistence) recorded = await repairRecordedResult(recorded)
+    if (recorded?.result) return res.json({ success: true, run: {
+      id: recorded.result.persistence?.generationRunId,
+      requestId: recorded.requestId,
+      status: recorded.result.images?.some((image) => image.status === 'completed') ? 'SUCCEEDED' : 'FAILED',
+      images: recorded.result.images,
+      errorMessage: recorded.result.persistenceWarning || recorded.result.images?.find((image) => image.error)?.error
+    } })
     const run = await getGenerationRunByRequestId({ requestId: req.params.requestId, actor: req.auth })
     if (!run) return res.status(404).json({ success: false, status: 'NOT_FOUND', message: '没有找到这次生成请求。' })
     res.json({ success: true, run })
@@ -69,7 +74,17 @@ router.post('/', async (req, res) => {
   const startedAt = Date.now()
   let cleanupReferenceFiles = async () => {}
   let activeGenerationRunId = null
+  let journal
+  let ownsRequest = false
   try {
+    const claimed = claimRequest('generation', generationRequestId, req.auth, req.body)
+    journal = claimed.entry
+    ownsRequest = !claimed.existing
+    if (claimed.existing) {
+      if (journal.pendingPersistence) journal = await repairRecordedResult(journal)
+      if (journal.result) return res.json(journal.result)
+      return res.status(journal.status === 'RUNNING' ? 202 : 409).json({ success: false, status: journal.status, requestId: generationRequestId, message: journal.message || '请查询原任务结果，勿重复生成。' })
+    }
     const {
       listing,
       imagePlans,
@@ -84,6 +99,10 @@ router.post('/', async (req, res) => {
 
     const hasLegacyPayload = listing && Array.isArray(imagePlans) && imagePlans.length > 0
     const hasExecutionPayload = executionContext?.product && executionContext?.strategy
+
+    if (Array.isArray(imagePlans) && imagePlans.length > 1) {
+      return res.status(400).json({ success: false, message: '每次请求只能生成一张图片，请逐张提交。' })
+    }
 
     if (!hasLegacyPayload && !hasExecutionPayload) {
       return res.status(400).json({
@@ -112,7 +131,7 @@ router.post('/', async (req, res) => {
       executionContext
     })
 
-    const hasReferenceImages = executionReferenceImages && executionReferenceImages.length > 0
+    const hasReferenceImages = executionReferenceImages.length > 0 || Boolean(executionPrimaryReferenceImageUrl)
     const plansMissingSavedPrompt = executionPlans.filter((plan) => {
       const taskType = plan.taskType
       return taskType !== 'main' && (
@@ -158,7 +177,6 @@ router.post('/', async (req, res) => {
     let refImagePaths = []
     let orderedReferenceRoles = []
     if (hasReferenceImages) {
-      await assertAccessibleAssetUrls({ urls: executionReferenceImages, actor: req.auth })
       const roleByUrl = new Map(
         (Array.isArray(executionReferenceImageRoles) ? executionReferenceImageRoles : [])
           .filter((item) => item?.url)
@@ -168,6 +186,7 @@ router.post('/', async (req, res) => {
         explicitPrimaryReferenceImageUrl,
         ...executionReferenceImages.filter((imageUrl) => imageUrl && imageUrl !== explicitPrimaryReferenceImageUrl)
       ].filter(Boolean).filter((imageUrl, index, source) => source.indexOf(imageUrl) === index)
+      await assertAccessibleAssetUrls({ urls: candidateReferenceImages, actor: req.auth })
       const referencePriority = (imageUrl) => {
         if (imageUrl === explicitPrimaryReferenceImageUrl) return 0
         if (roleByUrl.get(imageUrl) === 'regeneration_reference') return 1
@@ -223,7 +242,7 @@ router.post('/', async (req, res) => {
     }
     if (startedRun?.existing) {
       if (startedRun.status === 'SUCCEEDED' && startedRun.images?.length) {
-        return res.json(buildGenerationSuccessResponse({
+        const result = buildGenerationSuccessResponse({
           images: startedRun.images.map((image) => ({
             ...image,
             imageId: executionPlans[0]?.id,
@@ -232,7 +251,9 @@ router.post('/', async (req, res) => {
           })),
           persistence: { generationRunId: startedRun.id },
           persistenceRequired: Boolean(req.auth)
-        }))
+        })
+        journal = updateRequest(journal, { status: 'SUCCEEDED', result })
+        return res.json(result)
       }
       const isTerminalConflict = ['FAILED', 'CONFLICT', 'SUCCEEDED'].includes(startedRun.status)
       return res.status(isTerminalConflict ? 409 : 202).json({
@@ -295,6 +316,7 @@ router.post('/', async (req, res) => {
           referenceImagesUsed: hasReferenceImages ? taskReferenceAssets.refImagePaths.length : 0,
           referenceImageRolesUsed: taskReferenceAssets.orderedReferenceRoles,
           imageUrl: generatedImage.imageUrl,
+          storageWarning: generatedImage.storageWarning,
           prompt,
           promptEn: normalizedPlan.promptEn || '',
           executionPromptEn: prompt,
@@ -333,7 +355,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const persistence = await persistGenerationResult({
+    const persistencePayload = {
       executionContext,
       images: generatedImages,
       model,
@@ -341,17 +363,17 @@ router.post('/', async (req, res) => {
       durationMs: Date.now() - startedAt,
       generationRunId: activeGenerationRunId,
       actor: req.auth
-    })
-
-    res.json(buildGenerationSuccessResponse({
+    }
+    journal = await recordCompletedResult(journal, persistencePayload, buildGenerationSuccessResponse({
       images: generatedImages,
-      persistence,
+      persistence: null,
       persistenceRequired: Boolean(req.auth)
     }))
+    res.json(journal.result)
   } catch (error) {
     console.error('Generate error:', error.response?.data || error.message)
 
-    if (activeGenerationRunId) {
+    if (activeGenerationRunId && !journal?.result) {
       await persistGenerationResult({
         executionContext: req.body?.executionContext,
         images: [{ status: 'failed', error: error.message }],
@@ -369,12 +391,13 @@ router.post('/', async (req, res) => {
         message: error.response.data?.error?.message || 'Unknown error'
       })
     } else {
-      res.status(500).json({
+      res.status(error.statusCode || 500).json({
         error: 'Server error',
         message: error.message
       })
     }
   } finally {
+    if (ownsRequest) failRequest(journal, '生图请求未完成，请检查错误详情。')
     try {
       await cleanupReferenceFiles()
     } finally {
@@ -467,6 +490,7 @@ async function callGPTImage2({ prompt, refImagePaths = [], size, apiKey, baseUrl
 
   return {
     imageUrl: stored.url,
+    storageWarning: stored.storageWarning,
     width: dimensions.width,
     height: dimensions.height
   }
@@ -1267,21 +1291,6 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
   }
 
   const targetLanguage = getTargetImageLanguage(listing)
-  const cacheKey = crypto
-    .createHash('sha256')
-    .update([model, targetLanguage, sourcePrompt, sourceExecutionRules].join('\n'))
-    .digest('hex')
-  const cachedTranslation = strategyTranslationCache.get(cacheKey)
-  if (cachedTranslation) {
-    return {
-      ...plan,
-      originalPrompt: sourcePrompt,
-      prompt: cachedTranslation,
-      promptEn: cachedTranslation,
-      promptDirty: false
-    }
-  }
-
   const productBlueprint = getProductBlueprint(listing)
 
   const userMessageSections = [
@@ -1303,6 +1312,11 @@ export async function translatePlanPromptIfNeeded(plan, listing, resolution) {
     userMessageSections.push('', 'Canonical Chinese execution rules:', sourceExecutionRules)
   }
   const userMessage = userMessageSections.join('\n')
+  const cacheKey = crypto.createHash('sha256').update(JSON.stringify([baseUrl, model, userMessage])).digest('hex')
+  const cachedTranslation = strategyTranslationCache.get(cacheKey)
+  if (cachedTranslation) {
+    return { ...plan, originalPrompt: sourcePrompt, prompt: cachedTranslation, promptEn: cachedTranslation, promptDirty: false }
+  }
 
   const response = await postJsonWithRetry(
     baseUrl + '/chat/completions',

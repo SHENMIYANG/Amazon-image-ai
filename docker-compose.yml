@@ -15,7 +15,9 @@ services:
       - AGENT_BASE_URL=${AGENT_BASE_URL}
       - AGENT_MODEL=${AGENT_MODEL}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - DATABASE_URL=${DATABASE_URL:-}
       - AUTH_SESSION_DAYS=${AUTH_SESSION_DAYS:-14}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-true}
       - BOOTSTRAP_ADMIN_LOGIN=${BOOTSTRAP_ADMIN_LOGIN}
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
       - BOOTSTRAP_ADMIN_NAME=${BOOTSTRAP_ADMIN_NAME}
@@ -29,3 +31,4 @@ services:
     restart: always
     volumes:
       - ./logs:/app/logs
+      - ./backend/uploads:/app/backend/uploads

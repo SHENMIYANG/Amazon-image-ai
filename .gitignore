@@ -18,6 +18,10 @@ backend/test-*.html
 backend/check-*.js
 backend/generate-template-examples.js
 !backend/test-generation-pipeline.js
+!backend/test-request-limits.js
+!backend/test-request-recovery.js
+!backend/test-request-integration.js
+!backend/test-workflow-safety.js
 
 # Environment variables (DO NOT commit API keys)
 .env

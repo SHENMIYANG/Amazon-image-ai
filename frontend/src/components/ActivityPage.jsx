@@ -220,6 +220,8 @@ function ActivityDetail({ record }) {
 
 export default function ActivityPage({ currentUser, workspaceId = '' }) {
   const [records, setRecords] = useState([])
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({ total: 0, hasNext: false })
   const [members, setMembers] = useState([])
   const [record, setRecord] = useState(null)
   const [selectedRecord, setSelectedRecord] = useState(null)
@@ -237,11 +239,17 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
   const isDetailPage = Boolean(workspaceId)
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
+    params.set('page', String(page))
     Object.entries(filters).forEach(([key, value]) => {
       if (value) params.set(key, value)
     })
     return params.toString()
-  }, [filters])
+  }, [filters, page])
+
+  const updateFilters = (next) => {
+    setPage(1)
+    setFilters(next)
+  }
 
   useEffect(() => {
     if (isDetailPage) return undefined
@@ -250,7 +258,10 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
     setError('')
     requestActivity(`/api/activity${queryString ? `?${queryString}` : ''}`)
       .then((data) => {
-        if (active) setRecords(data.records || [])
+        if (active) {
+          setRecords(data.records || [])
+          setPagination(data.pagination || { total: data.records?.length || 0, hasNext: false })
+        }
       })
       .catch((loadError) => {
         if (active) setError(loadError.message || '使用记录读取失败。')
@@ -331,14 +342,14 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
               <h1>使用记录</h1>
               <p>{isAdmin ? '查看团队产品、策略和出图记录' : '查看你创建的产品、策略和出图记录'}</p>
             </div>
-            <span className="activity-record-count">{loading ? '正在读取...' : `${records.length} 条记录`}</span>
+            <span className="activity-record-count">{loading ? '正在读取...' : `${pagination.total} 条记录`}</span>
           </section>
           <section className="activity-filter-bar" aria-label="记录筛选">
-            <input value={filters.q} onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="搜索产品名称" />
+            <input value={filters.q} onChange={(event) => updateFilters((current) => ({ ...current, q: event.target.value }))} placeholder="搜索产品名称" />
             <select
               value={filters.stage}
               onChange={(event) =>
-                setFilters((current) => ({
+                updateFilters((current) => ({
                   ...current,
                   stage: event.target.value
                 }))
@@ -353,7 +364,7 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
               <select
                 value={filters.memberId}
                 onChange={(event) =>
-                  setFilters((current) => ({
+                  updateFilters((current) => ({
                     ...current,
                     memberId: event.target.value
                   }))
@@ -371,7 +382,7 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
               type="date"
               value={filters.from}
               onChange={(event) =>
-                setFilters((current) => ({
+                updateFilters((current) => ({
                   ...current,
                   from: event.target.value
                 }))
@@ -382,7 +393,7 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
               type="date"
               value={filters.to}
               onChange={(event) =>
-                setFilters((current) => ({
+                updateFilters((current) => ({
                   ...current,
                   to: event.target.value
                 }))
@@ -446,6 +457,11 @@ export default function ActivityPage({ currentUser, workspaceId = '' }) {
               </tbody>
             </table>
           </section>
+          <nav className="activity-pagination" aria-label="使用记录分页">
+            <button type="button" disabled={loading || page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</button>
+            <span>第 {page} 页</span>
+            <button type="button" disabled={loading || !pagination.hasNext} onClick={() => setPage((current) => current + 1)}>下一页</button>
+          </nav>
           {(selectedRecord || detailLoading) && (
             <div className="activity-detail-overlay" role="presentation">
               <aside className="activity-detail-drawer" role="dialog" aria-modal="true" aria-label="产品使用记录详情">

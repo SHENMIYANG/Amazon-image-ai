@@ -121,6 +121,7 @@ export default function AmazonListingForm({
               strategyContent: prompt,
               prompt,
               promptEn: '',
+              databasePlanVersionId: null,
               promptDirty: true
             }
           : plan
@@ -142,6 +143,7 @@ export default function AmazonListingForm({
               ...plan,
               executionRules,
               promptEn: '',
+              databasePlanVersionId: null,
               promptDirty: true
             }
           : plan
@@ -362,7 +364,7 @@ export default function AmazonListingForm({
                   const hasStrategy = Boolean(String(plan.strategyContent || '').trim())
                   const englishStatus =
                     plan.taskType === 'main'
-                      ? '主图固定英文稿'
+                      ? hasStrategy ? plan.promptDirty ? '主图策略待保存' : '主图策略已保存' : '未生成主图策略'
                       : plan.promptDirty
                         ? '英文执行稿待更新'
                         : plan.promptEn
@@ -421,18 +423,16 @@ export default function AmazonListingForm({
                         </div>
                       ) : null}
 
-                      {plan.taskType !== 'main' ? (
-                        <div className="image-plan-actions">
+                      <div className="image-plan-actions">
                           <button
                             type="button"
                             className="editor-modal-btn editor-modal-btn--ghost image-plan-save-btn"
                             onClick={() => onSaveStrategyTranslation?.(plan.taskKey, plan)}
                             disabled={!hasStrategy || isSaving}
                           >
-                            {isSaving ? '保存中...' : '保存本图英文执行稿'}
+                            {isSaving ? '保存中...' : plan.taskType === 'main' ? '保存主图策略' : '保存本图英文执行稿'}
                           </button>
-                        </div>
-                      ) : null}
+                      </div>
                     </div>
                   )
                 })}

@@ -1,6 +1,9 @@
 import express from 'express'
 import OpenAI from 'openai'
-import { loadImageFeedbackThread, persistImageFeedbackExchange } from '../services/persistence/workbenchRepository.js'
+import sharp from 'sharp'
+import { loadImageFeedbackThread, persistImageFeedbackExchange, assertAccessibleAssetUrls } from '../services/persistence/workbenchRepository.js'
+import { readAssetUrlBuffer } from '../services/storage.js'
+import { assertReferenceBudget } from '../utils/referenceLimits.js'
 
 const router = express.Router()
 
@@ -15,7 +18,7 @@ function getOpenAIClient() {
     throw error
   }
 
-  return new OpenAI({ apiKey, baseURL, timeout })
+  return new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0 })
 }
 
 function safeJsonParse(text) {
@@ -164,17 +167,28 @@ router.post('/chat', async (req, res) => {
     const feedbackReferenceImages = Array.isArray(req.body?.feedbackReferenceImages)
       ? req.body.feedbackReferenceImages.filter(Boolean)
       : []
+    const imageUrls = [...new Set([currentThread.generatedImage?.imageUrl, ...feedbackReferenceImages].filter(Boolean))]
+    assertReferenceBudget(imageUrls)
+    await assertAccessibleAssetUrls({ urls: imageUrls, actor: req.auth })
+    const visualParts = []
+    for (const url of imageUrls) {
+      const buffer = await sharp(await readAssetUrlBuffer(url)).rotate().resize({ width: 1536, height: 1536, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+      visualParts.push(
+        { type: 'text', text: url === currentThread.generatedImage?.imageUrl ? '当前生成图，请检查其实际内容。' : '运营上传的修改参考图，仅参考表达方式，不能覆盖产品事实。' },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${buffer.toString('base64')}` } }
+      )
+    }
     const messages = [
       { role: 'system', content: buildSystemPrompt() },
       {
         role: 'user',
-        content: buildContextPrompt({
+        content: [{ type: 'text', text: buildContextPrompt({
           productBlueprint: currentThread.productBlueprint,
           imagePlan: currentThread.imagePlan,
           generatedImage: currentThread.generatedImage,
           currentRevision: currentThread.revision,
           feedbackReferenceImages
-        })
+        }) }, ...visualParts]
       },
       ...normalizeMessages(currentThread.messages),
       { role: 'user', content: userMessage }
